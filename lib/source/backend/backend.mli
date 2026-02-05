@@ -1,8 +1,5 @@
-module Precedence_resolver : module type of Precedence_resolver
 (** Precedence resolver for operator precedence handling *)
-
-module Backend_utils : module type of Backend_utils
-(** Internal utilities for name transformation and constant processing *)
+module Precedence_resolver : module type of Precedence_resolver
 
 (** [Make (Store) (Config)] creates a backend transformation module.
 
