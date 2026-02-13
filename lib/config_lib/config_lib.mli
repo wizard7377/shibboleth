@@ -1,5 +1,8 @@
 include module type of Config_lib_
 
+val is_flag_enabled : level -> bool
+val engaged : level -> bool
+
 type t
 type arg
 type 'a flag = 'a Config_lib_.flag

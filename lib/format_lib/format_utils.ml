@@ -8,7 +8,7 @@ let ( ++ ) = Fmt.( ++ )
 (* ========== Utility Functions ========== *)
 
 let top_sep : _ Fmt.t =
- fun f x -> (Fmt.cut ++ Fmt.const Fmt.string ";;" ++ Fmt.cut) f x
+ fun f x -> Fmt.const Fmt.string ";;" f x
 
 let use (fmt : 'a -> unit t) : 'a t = fun f x -> fmt x f ()
 let opt_val t ~default = match t with None -> default | Some x -> x
@@ -28,7 +28,7 @@ let list ?(sep = Fmt.sp) ?(first = Fmt.nop) ?(last = Fmt.nop) fu f = function
       last f ()
 
 let alts (f : 'a t) : 'a list t =
-  Fmt.vbox (Fmt.list ~sep:(Fmt.cut ++ Fmt.const Fmt.string "|" ++ Fmt.cut) f)
+  Fmt.hvbox (Fmt.list ~sep:(Fmt.sp ++ Fmt.const Fmt.string "| ") f)
 
 let option ?(first = Fmt.nop) ?(last = Fmt.nop) fu f = function
   | None -> ()
@@ -56,7 +56,7 @@ let parens_if cond fmt = if cond then parens fmt else fmt
 
 (* Keyword and operator helpers *)
 let kwd s : _ Fmt.t = fun f x -> fstr (s ^ " ") f x
-let op s : _ Fmt.t = fun f x -> fstr (" " ^ s ^ " ") f x
+let op s : _ Fmt.t = fun f x -> (Fmt.sp ++ fstr (s ^ " ")) f x
 let sep s : _ Fmt.t = fun f x -> fstr s f x
 
 (* Common separators *)

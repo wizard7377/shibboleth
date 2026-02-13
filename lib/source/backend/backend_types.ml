@@ -20,6 +20,7 @@ end
 module type TYPE_PROCESSOR = sig
   val process_type_value : Ast.typ Ast.node -> Parsetree.core_type
   val process_object_field_type : Ast.typ_row Ast.node -> Parsetree.object_field list
+  val process_label_declaration : Ast.typ_row Ast.node -> Parsetree.label_declaration list
   val process_type : Ast.typ Ast.node -> Parsetree.core_type
 end
 
@@ -49,11 +50,21 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
       | TypTuple tys ->
           Builder.ptyp_tuple (List.map (fun t -> process_type_value t) tys)
       | TypRecord fields ->
-          let fields' =
+          (* Emit a [%record_type ...] extension node.
+             The payload encodes the record fields as label declarations
+             inside a Pstr_type, to be expanded by process_records. *)
+          let labels =
             List.flatten
-              (List.map (fun f -> process_object_field_type f) fields)
+              (List.map (fun f -> process_label_declaration f) fields)
           in
-          Builder.ptyp_object fields' Closed)
+          let td =
+            Builder.type_declaration ~name:(ghost "__record") ~params:[] ~cstrs:[]
+              ~kind:(Parsetree.Ptype_record labels)
+              ~private_:Asttypes.Public ~manifest:None
+          in
+          let str_item = Builder.pstr_type Recursive [td] in
+          let payload = Parsetree.PStr [str_item] in
+          Builder.ptyp_extension ({ txt = "record_type"; loc = Helpers.empty_loc }, payload))
 
   (** Convert SML record type rows to OCaml object fields. *)
   and process_object_field_type (field : Ast.typ_row Ast.node) :
@@ -71,8 +82,25 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
         match rest with
         | Some rest' -> here :: process_object_field_type rest'
         | None -> [ here ])
+
+  (** Convert SML record type rows to OCaml label declarations (for record types). *)
+  and process_label_declaration (field : Ast.typ_row Ast.node) :
+      Parsetree.label_declaration list =
+    match field.value with
+    | Ast.TypRow (name, ty, rest) ->
+        let label_name =
+          name_to_string (Backend_utils.idx_to_name name.value)
+        in
+        let here : Parsetree.label_declaration =
+          Ast_helper.Type.field ~loc:Helpers.empty_loc
+            (ghost label_name) (process_type_value ty)
+        in
+        let here = labeller#cite Helpers.Attr.label_declaration field.comments here in
+        (match rest with
+        | Some rest' -> here :: process_label_declaration rest'
+        | None -> [ here ])
   and make_arrow (ty1 : Ast.typ Ast.node) (ty2 : Ast.typ Ast.node) = 
-    if not @@ Common.engaged @@ Common.get Curry_types config then 
+    if not @@ Common.engaged @@ Common.get (Convert_flag Curry_types) config then
       Builder.ptyp_arrow Nolabel (process_type_value ty1) (process_type_value ty2)
     else
     begin match ty1.value with

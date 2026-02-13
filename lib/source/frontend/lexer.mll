@@ -145,6 +145,11 @@ rule token = parse
   | "..."         { ELLIPSIS }
   | "=>"          { BIGARROW }
   | "->"          { ARROW }
+  (* FFI keywords - must appear before '_' to get longest match *)
+  | "_import"     { FFI_IMPORT }
+  | "_export"     { FFI_EXPORT }
+  | "_address"    { FFI_ADDRESS }
+  | "_symbol"     { FFI_SYMBOL }
   | '_'           { UNDERSCORE }
   | "#["        { HASH_OPEN }
   | '#'           { HASH }

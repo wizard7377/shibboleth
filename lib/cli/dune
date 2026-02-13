@@ -1,6 +1,6 @@
 (library
  (public_name shibboleth.cli)
  (name cli)
- (libraries re cmdliner process shibboleth ppx_import)
+ (libraries re cmdliner process shibboleth ppx_import pkg)
  (preprocess
   (staged_pps ppx_import ppx_deriving.show)))

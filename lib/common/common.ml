@@ -33,22 +33,26 @@ let convert_path_dashes_to_underscores (p : Fpath.t) : Fpath.t =
   Fpath.v (String.concat Fpath.dir_sep converted_segments)
 
 include Config_lib
-include Logger
-module type LOG = sig 
+
+(** Logger types - renamed to avoid shadowing Config_lib.level *)
+type log_level = Logger.level = High | Medium | Low | Debug
+type kind = Logger.kind = Positive | Negative | Neutral | Warning
+
+module type LOG = sig
     val log :
-    ?subgroup:string -> ?level:level -> ?kind:kind -> msg:string -> unit -> unit
+    ?subgroup:string -> ?level:log_level -> ?kind:kind -> msg:string -> unit -> unit
 
   val log_with :
     cfg:t ->
     ?subgroup:string ->
-    ?level:level ->
+    ?level:log_level ->
     ?kind:kind ->
     msg:string ->
     unit ->
     unit
   val log_fmt :
     ?subgroup:string ->
-    ?level:level ->
+    ?level:log_level ->
     ?kind:kind ->
     msg:(unit Fmt.t) ->
     unit ->
@@ -60,7 +64,7 @@ module type S = sig
   val group : string
 end
 
-module Make (C : S) = Logger.Make (struct
+module Make (C : S) : LOG = Logger.Make (struct
   let config = C.config
   let group = C.group
 end)

@@ -1,34 +1,46 @@
-type convert_flag = Enable | Warn | Note | Disable
+type level = [`Disable | `Embed | `Enable]
+type mangle = [`MangleOld | `MangleNew | `MangleNone]
 type source = File of string list | StdIn
 type target = FileOut of string | StdOut | Silent
 
 type _ flag =
-  | Convert_names : convert_flag flag
-  | Convert_keywords : convert_flag flag
-  | Rename_types : convert_flag flag
-  | Make_make_functor : convert_flag flag
-  | Guess_pattern : convert_flag flag
-  | Curry_expressions : convert_flag flag
-  | Curry_types : convert_flag flag
-  | Toplevel_names : convert_flag flag
-  | Verbosity : int flag
-  | Concat_output : bool flag
-  | Force : bool flag
-  | Quiet : bool flag
-  | Guess_var : string option flag
-  | Debug : string list flag
-  | Check_ocaml : bool flag
-  | Dash_to_underscore : bool flag
-  | Input_file : source flag
-  | Output_file : target flag
-  | Context_output : string option flag
-  | Context_input : string option flag
+  | Misc_flag : 'a misc_flag -> 'a flag
+  | Mangle_flag : 'a mangle_flag -> 'a flag
+  | Convert_flag : 'a convert_flag -> 'a flag
+  | Shell_flag : 'a shell_flag -> 'a flag
+  | File_flag : 'a file_flag -> 'a flag
+  | Dune_flag : 'a dune_flag -> 'a flag
 
-(** Check if a conversion flag is active (not Disable). *)
-let is_flag_enabled = function Enable | Warn | Note -> true | Disable -> false
+and _ file_flag =
+  | Input_file : source file_flag
+  | Output_file : target file_flag
+  | Context_output : string option file_flag
+  | Context_input : string option file_flag
 
-(** [engaged flag] returns true if the conversion flag is Enable or Warn. *)
-let engaged = function Enable | Warn -> true | _ -> false
+and _ shell_flag = 
+  | Force : bool shell_flag
+  | Verbosity : int shell_flag
+  | Debug : string list shell_flag
+  | Quiet : bool shell_flag
 
-(** [noted flag] returns true if the conversion flag is Warn or Note. *)
-let noted = function Warn | Note -> true | _ -> false
+and _ convert_flag = 
+  | Convert_names : level convert_flag
+  | Convert_keywords : level convert_flag
+  | Rename_types : level convert_flag
+  | Curry_expressions : level convert_flag
+  | Curry_types : level convert_flag
+  | Toplevel_names : level convert_flag
+and _ misc_flag =
+  | Concat_output : bool misc_flag
+  | Check_ocaml : bool misc_flag
+  | Dash_to_underscore : bool misc_flag
+and _ mangle_flag =
+  | Type_mangle : mangle mangle_flag
+  | Constructor_mangle : mangle mangle_flag
+  
+and _ dune_flag = 
+  | Dune_enable : bool dune_flag
+  | Dune_import : string list dune_flag
+  | Dune_package : string option dune_flag 
+  | Dune_wrapped : bool dune_flag
+  | Dune_open : string list dune_flag (* Strictly, this isn't specific to dune, but it will likely only see use with libraries *)

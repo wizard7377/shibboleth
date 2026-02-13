@@ -32,6 +32,26 @@
       match specification.value with
       | SpecSeq (s1, s2) -> flatten_spec_node s1 @ flatten_spec_node s2
       | _ -> [specification]
+
+    (* Convert FFI attribute string to ffi_attr *)
+    let ffi_attr_of_string s =
+      match s with
+      | "alloc" -> FFIAlloc
+      | "cdecl" -> FFICDecl
+      | "external" -> FFIExternal
+      | "impure" -> FFIImpure
+      | "private" -> FFIPrivate
+      | "public" -> FFIPublic
+      | "pure" -> FFIPure
+      | "reentrant" -> FFIReentrant
+      | "stdcall" -> FFIStdcall
+      | _ -> failwith (Printf.sprintf "Unknown FFI attribute: %s" s)
+
+    (* Collect types from a typ, flattening arrow types into a list *)
+    let rec collect_ffi_types (t : Ast.typ) : Ast.typ list =
+      match t with
+      | TypFun (arg, ret) -> arg.value :: collect_ffi_types ret.value
+      | other -> [other]
 %}
 
 (* ========================================================================= *)
@@ -115,6 +135,14 @@
 %token<Tokens.ident> SYMBOL_IDENT
 %token<Tokens.ident list> LONG_IDENT
 %token<string> TYVAR
+
+%token<string> SPECIAL
+
+(* FFI keywords *)
+%token FFI_IMPORT "_import"
+%token FFI_EXPORT "_export"
+%token FFI_ADDRESS "_address"
+%token FFI_SYMBOL "_symbol"
 
 %token<string list> EOF
 
@@ -216,6 +244,8 @@
 %type <Ast.typ node option> of_typ_opt colon_typ_opt
 %type <int> digit_opt
 %type <Ast.pat node option> as_pat_opt
+%type <Ast.ffi_attr list> ffi_attrs
+%type <Ast.ffi_attr> ffi_attr
 
 %start main
 %start<Ast.prog * string list> main_top
@@ -377,6 +407,7 @@ typ:
   | tuple_typ {
       if List.length $1 = 1 then (List.hd $1).value else TypTuple $1
     }
+  | SPECIAL { TypPrim ($1) }
 ;
 
 tuple_typ:
@@ -437,6 +468,20 @@ expression:
   | "while" c=expression "do" bdy=expression { WhileExp (bp c $startpos(c) $endpos(c), bp bdy $startpos(bdy) $endpos(bdy)) }
   | "case" e=expression "of" m=match_clause { CaseExp (bp e $startpos(e) $endpos(e), bp m $startpos(m) $endpos(m)) }
   | "fn" m=match_clause { FnExp (bp m $startpos(m) $endpos(m)) }
+  | SPECIAL { PrimExp ($1) }
+  (* FFI expressions: _import, _export, _address, _symbol *)
+  | "_import" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIImport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_import" STAR ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = "*"; kind = FFIImport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_export" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIExport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_address" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIAddress; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_symbol" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFISymbol; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_symbol" STAR COLON typ SEMICOLON
+      { FfiExp { c_name = "*"; kind = FFISymbol; ty = collect_ffi_types $4; attrs = [] } }
   ;
 
 (* Flat sequence of expression items: values, functions, and operators *)
@@ -622,6 +667,7 @@ dec_seq:
   | expression SEMICOLON+ dec_seq { SeqDec [bp (ExpDec (bp $1 $startpos($1) $endpos($1))) $startpos($1) $endpos($1); bp $3 $startpos($3) $endpos($3)] }
   | expression { SeqDec [bp (ExpDec (bp $1 $startpos($1) $endpos($1))) $startpos($1) $endpos($1)] }
   | { SeqDec [] }
+  | SPECIAL { PrimDec ($1) }
 ;
 
 (* Non-empty declaration sequence - requires at least one declaration *)
@@ -1043,6 +1089,19 @@ fctbind:
 and_fctbind_opt:
   | "and" fctbind { Some (bp $2 $startpos($2) $endpos($2)) }
   | { None }
+;
+
+(* ========================================================================= *)
+(* FFI Attributes                                                            *)
+(* ========================================================================= *)
+
+ffi_attrs:
+  | ffi_attr ffi_attrs { $1 :: $2 }
+  | { [] }
+;
+
+ffi_attr:
+  | SHORT_IDENT { ffi_attr_of_string (match $1 with Name s -> s | Symbol s -> s) }
 ;
 
 (* ========================================================================= *)

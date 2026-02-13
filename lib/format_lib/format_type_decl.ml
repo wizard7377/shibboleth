@@ -14,7 +14,7 @@ module Make
   let rec type_params f = function
     | [] -> ()
     | [ p ] -> (ClassT.type_param ++ Fmt.sp) f p
-    | l -> (parens (list ClassT.type_param ~sep:(comma ++ Fmt.sp)) ++ Fmt.sp) f l
+    | l -> (parens (list ClassT.type_param ~sep:comma) ++ Fmt.sp) f l
 
   and type_def_list f (rf, exported, l) =
     let type_decl kwd rf f x =
@@ -52,8 +52,7 @@ module Make
         (fun f () ->
           mutable_flag pld.pld_mutable f ();
           Fmt.string f pld.pld_name.txt;
-          Fmt.string f ":";
-          Fmt.sp f ();
+          Fmt.string f ": ";
           CT.core_type f pld.pld_type;
           Fmt.sp f ();
           Attrs.attributes f pld.pld_attributes)
@@ -75,14 +74,16 @@ module Make
         Fmt.string f "private")
     in
     let ctor f pcd =
-      Fmt.string f "|";
-      Fmt.sp f ();
-      constructor_decl f
-        ( pcd.pcd_name.txt,
-          pcd.pcd_vars,
-          pcd.pcd_args,
-          pcd.pcd_res,
-          pcd.pcd_attributes )
+      Fmt.box ~indent:2
+        (fun f () ->
+          Fmt.string f "| ";
+          constructor_decl f
+            ( pcd.pcd_name.txt,
+              pcd.pcd_vars,
+              pcd.pcd_args,
+              pcd.pcd_res,
+              pcd.pcd_attributes ))
+        f ()
     in
     (match x.ptype_manifest with
     | None -> ()
@@ -108,7 +109,7 @@ module Make
         intro f;
         priv f;
         Fmt.sp f ();
-        list ~sep:Fmt.sp ctor f xs
+        Fmt.vbox (fun f xs -> list ~sep:Fmt.sp ctor f xs) f xs
     | Ptype_abstract -> ()
     | Ptype_record l ->
         intro f;
@@ -161,11 +162,11 @@ module Make
     let pp_args f = function
       | Pcstr_tuple [] -> ()
       | Pcstr_tuple l ->
-          list (Fmt.parens CT.core_type)
-            ~sep:(fun f () ->
-              Fmt.sp f ();
-              Fmt.string f "*";
-              Fmt.sp f ())
+          Fmt.hvbox
+            (list (Fmt.parens CT.core_type)
+               ~sep:(fun f () ->
+                 Fmt.string f " *";
+                 Fmt.sp f ()))
             f l
       | Pcstr_record l -> record_declaration f l
     in
@@ -191,8 +192,7 @@ module Make
               Fmt.sp f ()
         in
         Fmt.string f name;
-        Fmt.string f ":";
-        Fmt.sp f ();
+        Fmt.string f ": ";
         pp_vars f vars;
         (match args with
         | Pcstr_tuple [] -> CT.core_type f r

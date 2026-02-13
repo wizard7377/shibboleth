@@ -68,7 +68,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
 
   let escape_keyword (s : string) : string =
     if Ppxlib.Keyword.is_keyword s
-       && is_flag_enabled (Common.get Convert_keywords config)
+       && is_flag_enabled (Common.get (Convert_flag Convert_keywords) config)
     then s ^ "_"
     else s
 
@@ -164,7 +164,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
   let depth : int ref = ref 0
 
   let trace_part ?(level = 2) ?(ast = "") ?(msg = "") ~value : 'a =
-    let verbosity = Common.get Verbosity config in
+    let verbosity = Common.get (Shell_flag Verbosity) config in
     if verbosity >= level then begin
         (* TODO use level *)
         let indent = !depth in
@@ -225,6 +225,9 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
 
   (** Convert SML record type rows to OCaml object fields. Delegated to Backend_types. *)
   let process_object_field_type = Types.process_object_field_type
+
+  (** Convert SML record type rows to OCaml label declarations. Delegated to Backend_types. *)
+  let process_label_declaration = Types.process_label_declaration
 
   (** Wrapper function for {!process_type_value}.
 
@@ -442,8 +445,13 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             let name_longident = build_longident ~capitalize_modules:true transformed_parts in
             Builder.pexp_construct (ghost name_longident) None
         | None ->
-            (* Value reference - use original logic *)
-            let name_longident = build_longident scoped_name in
+            (* Value reference - apply same lowercase transform as pattern variables
+               to ensure consistent renaming (e.g. G -> g_ in both pat and exp) *)
+            let lowered_name = match List.rev scoped_name with
+              | last :: prefix -> List.rev (Backend_utils.transform_to_lowercase last :: prefix)
+              | [] -> scoped_name
+            in
+            let name_longident = build_longident lowered_name in
             Builder.pexp_ident (ghost name_longident))
     (* TODO: InfixApp removed - will be replaced by precedence-resolved ExpApp *)
     (* | InfixApp (e1, op, e2) ->
@@ -1563,7 +1571,16 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         let args =
           match ty_opt with
           | None -> Parsetree.Pcstr_tuple []
-          | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
+          | Some ty -> (
+              match ty.value with
+              | TypRecord fields ->
+                  (* Inline record: Foo of {x: int, y: int} → Foo of { x: int; y: int } *)
+                  let labels =
+                    List.flatten
+                      (List.map (fun f -> process_label_declaration f) fields)
+                  in
+                  Parsetree.Pcstr_record labels
+              | _ -> Parsetree.Pcstr_tuple [ process_type ty ])
         in
         let cdecl =
           labeller#cite Helpers.Attr.constructor_declaration id.comments
@@ -2560,17 +2577,20 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
 
   (** Main entry point for converting a complete SML program. Wraps the
       converted structure in a toplevel phrase for output. *)
-  and process_sml ~(prog : Ast.prog) : res =
+  and process_sml ?(header: string list=[]) ~(prog : Ast.prog) : res =
     let output_src =
-      Common.get Verbosity config >= 2
+      Common.get (Shell_flag Verbosity) config >= 2
     in
     if output_src then Stdlib.Format.eprintf "@,Lexical source: @[%s@]@," lexbuf;
     let structure = process_prog prog in
     let trailing = labeller#flush_all_remaining_as_structure_items in
     let structure = structure @ trailing in
+    let header_infos : Ppxlib.Ast.include_declaration list = List.map (fun src -> Builder.(include_infos (pmod_ident (ghost (Longident.Lident src))))) header in
+    let header_ast = List.map (fun info -> Builder.pstr_include info) header_infos in
+    let full = header_ast @ structure in
     let _ = labeller#destruct () in
     labeller#check_all_comments_emitted;
-    [ Parsetree.Ptop_def structure ]
+    [ Parsetree.Ptop_def full ]
 
   (** Get all constructors from the registry for manifest generation *)
   let get_all_constructors () : Context.Constructor_registry.constructor_info list =

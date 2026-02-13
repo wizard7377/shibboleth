@@ -1,9 +1,24 @@
-type 'a grammar = (Lexing.lexbuf -> Parser.token) -> Lexing.lexbuf -> 'a
+module I = Parser.MenhirInterpreter
 
-let expression_grammar : Ast.expression grammar = Parser.expression_top
-let pat_grammar : Ast.pat grammar = Parser.pat_top
-let typ_grammar : Ast.typ grammar = Parser.typ_top
-let main_grammar : Ast.prog grammar = fun f b -> fst @@ Parser.main f b
+type 'a grammar = Lexing.lexbuf -> 'a
+
+(** Run an incremental parser checkpoint to completion.
+    On error, raises [Parser.Error] which is caught by [parse_with]. *)
+let run (lexbuf : Lexing.lexbuf) (checkpoint : 'a I.checkpoint) : 'a =
+  let supplier = I.lexer_lexbuf_to_supplier Lexer.token lexbuf in
+  I.loop_handle Fun.id (fun _ -> raise Parser.Error) supplier checkpoint
+
+let expression_grammar : Ast.expression grammar = fun lexbuf ->
+  run lexbuf (Parser.Incremental.expression_top lexbuf.lex_curr_p)
+
+let pat_grammar : Ast.pat grammar = fun lexbuf ->
+  run lexbuf (Parser.Incremental.pat_top lexbuf.lex_curr_p)
+
+let typ_grammar : Ast.typ grammar = fun lexbuf ->
+  run lexbuf (Parser.Incremental.typ_top lexbuf.lex_curr_p)
+
+let main_grammar : Ast.prog grammar = fun lexbuf ->
+  fst (run lexbuf (Parser.Incremental.main_top lexbuf.lex_curr_p))
 
 (** Collect all positioned nodes from a prog tree in source order.
     Returns a flat list of mutable ref cells pointing to nodes that
@@ -93,9 +108,7 @@ let parse_with : grammar:'a grammar -> string -> 'a =
  fun ~grammar s ->
   let lexbuf = Lexing.from_string s in
   Utils.reset_comments ();
-  try
-    let res = grammar Lexer.token lexbuf in
-    res
+  try grammar lexbuf
   with _ ->
     let pos = Lexing.lexeme_start_p lexbuf in
     let line = pos.Lexing.pos_lnum in

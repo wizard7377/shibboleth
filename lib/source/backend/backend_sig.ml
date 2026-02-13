@@ -20,13 +20,16 @@ module type BACKEND = sig
 
   type res = Parsetree.toplevel_phrase list
 
-  val process_sml : prog:Ast.prog -> res
+  val process_sml : ?header:string list -> prog:Ast.prog -> res
 
   val process_type_value : Ast.typ Ast.node -> Parsetree.core_type
   (** Exported for testing *)
 
   val process_object_field_type :
     Ast.typ_row Ast.node -> Parsetree.object_field list
+
+  val process_label_declaration :
+    Ast.typ_row Ast.node -> Parsetree.label_declaration list
 
   val process_type : Ast.typ Ast.node -> Parsetree.core_type
   val process_con : Ast.constant Ast.node -> Parsetree.constant

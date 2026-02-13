@@ -27,7 +27,7 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
       last_constructors
 
     method private get_fmt =
-      match Common.get Output_file cfg with
+      match Common.get (File_flag Output_file) cfg with
       | FileOut path ->
           let oc = open_out path in
           Stdlib.Format.formatter_of_out_channel oc
@@ -38,7 +38,7 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
       lexbuf <- s;
       Frontend.parse s
 
-    method convert_to_ocaml (sml : sml_code) : ocaml_code =
+    method convert_to_ocaml ?(header : string list = []) (sml : sml_code) : ocaml_code =
       Log.log_with ~cfg ~level:Low ~kind:Neutral
         ~msg:"Starting conversion from SML to OCaml..." ();
       let ctx = Context.create (Context.Info.create []) in
@@ -56,12 +56,15 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
         let config = self#get_config ()
       end in
       let module Backend = Backend.Make (BackendContext) (BackendConfig) in
-      let raw_ocaml = Backend.process_sml ~prog:sml in
-      last_constructors <- Backend.get_all_constructors ();
+      let raw_ocaml = Backend.process_sml ~header:header ~prog:sml in
+      last_constructors <- last_constructors @ Backend.get_all_constructors ();
+      Log.log_with ~cfg ~level:Low ~kind:Neutral
+        ~msg:"Expanding record types (process phase)..." ();
+      let record_expanded = Process_records.expand_record_types raw_ocaml in
       Log.log_with ~cfg ~level:Low ~kind:Neutral
         ~msg:"Post-processing names (ocaml phase)..." ();
       let post_processor = new Ocaml.process_ocaml ~opts:(self#get_config ()) in
-      post_processor#run_process raw_ocaml
+      post_processor#run_process record_expanded
 
     method print_ocaml (ocaml_code : ocaml_code) : string =
       let buffer = Buffer.create 256 in
@@ -70,9 +73,9 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
       Stdlib.Format.pp_print_flush fmt ();
       Buffer.contents buffer
 
-    method process_file (input : string) : string =
+    method process_file ?(header : string list = []) (input : string) : string =
       let sml_code = self#parse_sml input in
-      let ocaml_code = self#convert_to_ocaml sml_code in
+      let ocaml_code = self#convert_to_ocaml ~header:header sml_code in
       let ocaml_output' = self#print_ocaml ocaml_code in
       let ocaml_output = Polish.polish ocaml_output' in
       let checked = Process_common.check_output ocaml_output in

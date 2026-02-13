@@ -65,7 +65,7 @@ module Make
 
   and value_description f x =
     if x.pval_prim <> [] then
-      (Fmt.sp ++ op "=" ++ list ~sep:Fmt.sp (fun f s -> escaped_string f s))
+      (op "=" ++ list ~sep:Fmt.sp (fun f s -> escaped_string f s))
         f x.pval_prim
 
   and exception_declaration f x =

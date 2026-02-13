@@ -19,6 +19,9 @@ module type TYPE_PROCESSOR = sig
   val process_object_field_type :
     Ast.typ_row Ast.node -> Parsetree.object_field list
 
+  val process_label_declaration :
+    Ast.typ_row Ast.node -> Parsetree.label_declaration list
+
   val process_type : Ast.typ Ast.node -> Parsetree.core_type
 end
 

@@ -43,30 +43,11 @@ let create info =
   { info; constructor_registry = registry }
 
 let merge t1 t2 =
-  (* Merge info *)
   let merged_info = Info.merge t1.info t2.info in
-  (* Create new context with merged info *)
-  let merged_ctx = create merged_info in
-  (* Copy constructors from both registries into the merged one *)
-  let constructors1 =
-    Constructor_registry.get_all_constructors t1.constructor_registry
+  let merged_registry =
+    Constructor_registry.merge t1.constructor_registry t2.constructor_registry
   in
-  let constructors2 =
-    Constructor_registry.get_all_constructors t2.constructor_registry
-  in
-  List.iter
-    (fun info ->
-      Constructor_registry.add_constructor merged_ctx.constructor_registry
-        ~path:info.Constructor_registry.path ~name:info.name
-        ~ocaml_name:info.ocaml_name)
-    constructors1;
-  List.iter
-    (fun info ->
-      Constructor_registry.add_constructor merged_ctx.constructor_registry
-        ~path:info.Constructor_registry.path ~name:info.name
-        ~ocaml_name:info.ocaml_name)
-    constructors2;
-  merged_ctx
+  { info = merged_info; constructor_registry = merged_registry }
 
 let basis_context = create Basis.basis_context
 

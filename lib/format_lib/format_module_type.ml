@@ -28,17 +28,22 @@ module Make
           longident_loc f li;
           Fmt.string f ")"
       | Pmty_signature s ->
-          Fmt.hvbox
-            (fun f s ->
-              Fmt.hvbox
-                (fun f s ->
-                  Fmt.string f "sig";
-                  Fmt.sp f ();
-                  list signature_item f s)
-                f s;
-              Fmt.sp f ();
-              Fmt.string f "end")
-            f s
+          if s = [] then (
+            Fmt.string f "sig";
+            Fmt.sp f ();
+            Fmt.string f "end")
+          else
+            Fmt.hvbox
+              (fun f s ->
+                Fmt.hvbox
+                  (fun f s ->
+                    Fmt.string f "sig";
+                    Fmt.sp f ();
+                    list signature_item f s)
+                  f s;
+                Fmt.sp f ();
+                Fmt.string f "end")
+              f s
       | Pmty_functor (Unit, mt2) ->
           Fmt.hvbox
             (fun f mt2 ->
@@ -65,8 +70,7 @@ module Make
                   Fmt.string f "(";
                   Fmt.string f name;
                   Fmt.sp f ();
-                  Fmt.string f ":";
-                  Fmt.sp f ();
+                  Fmt.string f ": ";
                   module_type f mt1;
                   Fmt.string f ")";
                   Fmt.sp f ();
@@ -106,7 +110,7 @@ module Make
     let type_params f = function
       | [] -> ()
       | [ p ] -> CT.core_type f p
-      | ps -> (parens (list CT.core_type ~sep:(comma ++ Fmt.sp))) f ps
+      | ps -> (parens (list CT.core_type ~sep:comma)) f ps
     in
     function
     | Pwith_type (li, td) ->

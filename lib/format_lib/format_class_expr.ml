@@ -57,8 +57,7 @@ module Make
             Fmt.string f "method virtual ";
             private_flag pf f ();
             Fmt.string f s.txt;
-            Fmt.string f " :";
-            Fmt.sp f ();
+            Fmt.string f " : ";
             CT.core_type f ct;
             Attrs.item_attributes f attrs)
           f ()
@@ -170,8 +169,7 @@ module Make
           Fmt.string f "(";
           class_expr f ce;
           Fmt.sp f ();
-          Fmt.string f ":";
-          Fmt.sp f ();
+          Fmt.string f ": ";
           ClassT.class_type f ct;
           Fmt.string f ")"
       | Pcl_extension e -> Attrs.extension f e

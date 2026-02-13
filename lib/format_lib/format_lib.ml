@@ -44,7 +44,7 @@ let directive_argument f x =
 
 let toplevel_phrase f = function
   | Astlib.Ast_414.Parsetree.Ptop_def s ->
-      Fmt.hvbox ~indent:0 (fun f s -> Format_utils.list ModExpr.structure_item f s) f s
+      Fmt.vbox ~indent:0 (fun f s -> Format_utils.list ~sep:Fmt.cut ModExpr.structure_item f s) f s
   | Ptop_dir { pdir_name; pdir_arg; _ } ->
       Format_utils.box 2
         (fun f () ->

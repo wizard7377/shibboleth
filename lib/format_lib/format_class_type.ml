@@ -41,8 +41,7 @@ module Make
             private_flag pf f ();
             virtual_flag vf f ();
             Fmt.string f s.txt;
-            Fmt.string f " :";
-            Fmt.sp f ();
+            Fmt.string f " : ";
             CT.core_type f ct;
             Attrs.item_attributes f x.pctf_attributes)
           f ()

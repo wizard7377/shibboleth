@@ -11,9 +11,9 @@ module PR = Backend.Precedence_resolver
 module TestConfig : Common.CONFIG = struct
   let config =
     Common.create [
-      Common.set Input_file Common.StdIn;
-      Common.set Output_file Common.Silent;
-      Common.set Verbosity 3
+      Common.set (File_flag Input_file) Common.StdIn;
+      Common.set (File_flag Output_file) Common.Silent;
+      Common.set (Shell_flag Verbosity) 3
     ]
 end
 
@@ -246,9 +246,9 @@ let test_process_type_record_single () =
       ]
   in
   let result = process_type_value (b input) in
-  let result_str = core_type_to_string result in
-  check bool "record type contains angle bracket" true
-    (String.contains result_str '<')
+  match result.ptyp_desc with
+  | Ptyp_extension ({ txt = "record_type"; _ }, _) -> ()
+  | _ -> fail "Expected [%record_type ...] extension node"
 
 let test_process_type_record_multiple () =
   let input =
@@ -267,8 +267,9 @@ let test_process_type_record_multiple () =
       ]
   in
   let result = process_type_value (b input) in
-  check bool "record type with multiple fields" true
-    (String.length (core_type_to_string result) > 0)
+  match result.ptyp_desc with
+  | Ptyp_extension ({ txt = "record_type"; _ }, _) -> ()
+  | _ -> fail "Expected [%record_type ...] extension node"
 
 (** Test cases for process_object_field_type *)
 
@@ -627,38 +628,6 @@ let test_process_pat_as () =
     (String.contains result_str 'x')
 *)
 
-(** Test configuration with guess_var enabled *)
-module TestConfigWithGuessVar : Common.CONFIG = struct
-  let config =
-    Common.create [
-      Common.set Input_file Common.StdIn;
-      Common.set Output_file Common.Silent;
-      Common.set Verbosity 3;
-      Common.set Guess_var (Some "[A-Z][a-zA-Z0-9_]*")
-    ]
-end
-
-module TestContextWithGuessVar = struct
-  let lexbuf = ""
-  let context = Context.basis_context
-end
-
-module TestBackendWithGuessVar =
-  Backend.Make (TestContextWithGuessVar) (TestConfigWithGuessVar)
-
-let test_process_pat_as_with_guess_var () =
-  (* Test that an as pattern variable matching guess_var gets lowercased and has _ appended *)
-  let input =
-    PatAs
-      ( b (WithoutOp (b (IdxIdx (b "Result")))),
-        None,
-        b (PatIdx (b (WithoutOp (b (IdxIdx (b "x")))))) )
-  in
-  let result = TestBackendWithGuessVar.process_pat (b input) in
-  let result_str = pattern_to_string result in
-  (* "Result" should be converted to "result_" because it matches the guess_var pattern *)
-  check string "as pattern variable matching guess_var gets _ suffix"
-    "x as result_" result_str
 
 let test_process_pat_ref () =
   (* Updated for list-based PatApp *)
@@ -1088,7 +1057,6 @@ let pattern_tests =
     ("typed pattern", `Quick, test_process_pat_typed);
     (* TODO: Restore after implementing precedence resolution *)
     (* ("as pattern (layered pattern)", `Quick, test_process_pat_as); *)
-    ("as pattern with guess_var", `Quick, test_process_pat_as_with_guess_var);
     ("ref pattern", `Quick, test_process_pat_ref);
     ("nested ref patterns", `Quick, test_process_pat_ref_nested);
   ]
@@ -1378,9 +1346,9 @@ let test_object_type_structure () =
   in
   let result = process_type_value (b input) in
   match result.ptyp_desc with
-  | Ptyp_object (_, _) -> ()
+  | Ptyp_extension ({ txt = "record_type"; _ }, _) -> ()
   | _ ->
-      fail "Expected object type structure (SML records become OCaml objects)"
+      fail "Expected [%record_type ...] extension node (SML records become record types)"
 
 (* Test declaration structures *)
 
@@ -1674,14 +1642,12 @@ let test_twelf_file (file_path : string) () : unit =
   (* Configure the converter *)
   let config =
     Common.create [
-      Common.set Input_file (Common.File [ file_path ]);
-      Common.set Output_file Common.Silent;
-      Common.set Verbosity 0;
-      Common.set Convert_names Enable;
-      Common.set Convert_keywords Enable;
-      Common.set Rename_types Enable;
-      Common.set Guess_pattern Enable;
-      Common.set Guess_var (Some {|[A-Z]s?[0-9]?'?|})
+      Common.set (File_flag Input_file) (Common.File [ file_path ]);
+      Common.set (File_flag Output_file) Common.Silent;
+      Common.set (Shell_flag Verbosity) 0;
+      Common.set (Convert_flag Convert_names) `Enable;
+      Common.set (Convert_flag Convert_keywords) `Enable;
+      Common.set (Convert_flag Rename_types) `Enable;
     ]
   in
 

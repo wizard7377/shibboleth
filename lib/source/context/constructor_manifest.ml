@@ -78,8 +78,14 @@ let read_combined_file path =
     close_in_noerr ic;
     raise e
 
+let simplify (modules : t) : t = 
+  List.map (fun { module_path; constructors } ->
+    let simplified_constructors =
+      List.sort_uniq Constructor_registry.compare_constructor_info constructors
+    in
+    { module_path; constructors = simplified_constructors }) modules
 let (++) (modules1 : t) (modules2 : t) : t =
-  modules1 @ modules2
+  simplify(modules1 @ modules2)
 
 let concat (module_lists : t list) : t =
-  List.concat module_lists
+  simplify (List.concat module_lists)

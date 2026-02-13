@@ -19,7 +19,7 @@ class process_group path cfg_init =
     val mutable store : Context.t = Context.create (Context.Info.create [])
     val mutable path : string = path
     val mutable members : t = { interface = None; implementation = None; exports = None }
-
+    val mutable has_mli : bool = false
     method get_store () : Context.t = store
     method set_store (s : Context.t) = store <- s
     method get_config () : Common.t = cfg
@@ -28,7 +28,7 @@ class process_group path cfg_init =
     method find_members (group_file : string) : t =
       (** Discover related files by checking for .sig, .fun, .sml extensions. *)
       {
-        interface = if Sys.file_exists (group_file ^ ".sig") then Some (group_file ^ ".sig") else None;
+        interface = if Sys.file_exists (group_file ^ ".sig") then (has_mli <- true ; Some (group_file ^ ".sig")) else None;
         implementation = if Sys.file_exists (group_file ^ ".fun") then Some (group_file ^ ".fun") else None;
         exports = if Sys.file_exists (group_file ^ ".sml") then Some (group_file ^ ".sml") else None;
       }
@@ -46,10 +46,10 @@ class process_group path cfg_init =
     method parse_members (members : t) : string =
       (** Process all member files and concatenate in order: interface → implementation → exports. *)
       try
-        (* Create separate processors for each file to maintain independent state *)
-        let p0 = new Process_file.process_file cfg_init in
-        let p1 = new Process_file.process_file cfg_init in
-        let p2 = new Process_file.process_file cfg_init in
+        (* Create processors that share context so constructors accumulate *)
+        let p0 = new Process_file.process_file ~store cfg_init in
+        let p1 = new Process_file.process_file ~store cfg_init in
+        let p2 = new Process_file.process_file ~store cfg_init in
 
         (* Process each member in order *)
         let interface_output = _self#process_member members.interface p0 in

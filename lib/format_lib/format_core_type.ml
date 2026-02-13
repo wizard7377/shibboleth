@@ -28,8 +28,8 @@ module Make (Attrs : Format_types.ATTRS) = struct
           assert (args <> []);
           let tys = List.map (fun (ct, l) f x -> type_with_label f (l, ct)) args in
           let ret' = Fmt.const core_type ret in
-          Fmt.parens (Fmt.concat ~sep:(op "->") (tys @ [ret'])) f ()
-      | Ptyp_tuple l -> (list core_type ~sep:(Fmt.sp ++ op "*")) f l
+          Fmt.parens (Fmt.hvbox (Fmt.concat ~sep:(fun f () -> Fmt.string f " ->"; Fmt.sp f ()) (tys @ [ret']))) f ()
+      | Ptyp_tuple l -> Fmt.hvbox (list core_type ~sep:(fun f () -> Fmt.string f " *"; Fmt.sp f ())) f l
       | Ptyp_constr (li, l) -> (
           match l with
           | [] -> longident_loc f li
@@ -37,7 +37,7 @@ module Make (Attrs : Format_types.ATTRS) = struct
               (Fmt.using fst core_type_parens ++ sp ++ Fmt.using snd longident_loc)
                 f (x, li)
           | _ ->
-              (Fmt.using fst (parens (list core_type ~sep:(comma ++ sp)))
+              (Fmt.using fst (parens (list core_type ~sep:comma))
               ++ sp
               ++ Fmt.using snd longident_loc)
                 f (l, li))
@@ -49,8 +49,8 @@ module Make (Attrs : Format_types.ATTRS) = struct
                    (Fmt.using (fun (s, _, _) -> s) Fmt.string
                    ++ sep ": "
                    ++ (Fmt.parens @@ Fmt.using (fun (_, ct, _) -> ct) core_type)
-                   ++ Fmt.sp
-                   ++ Fmt.using (fun (_, _, attrs) -> attrs) Attrs.attributes))
+                   ++ Fmt.using (fun (_, _, attrs) -> attrs) (fun f attrs ->
+                     if attrs <> [] then (Fmt.sp f (); Attrs.attributes f attrs))))
                   f
                   (l.txt, ct, x.pof_attributes)
             | Oinherit ct -> hvbox core_type f ct
@@ -64,7 +64,7 @@ module Make (Attrs : Format_types.ATTRS) = struct
             (fun f l ->
               Fmt.string f "<";
               Fmt.sp f ();
-              list core_field_type ~sep:semi f l;
+              list core_field_type ~sep:(fun f () -> Fmt.string f ";"; Fmt.sp f ()) f l;
               field_var f o;
               Fmt.sp f ();
               Fmt.string f ">")
@@ -90,7 +90,7 @@ module Make (Attrs : Format_types.ATTRS) = struct
           let aux f (s, ct) =
             (kwd "type"
             ++ Fmt.using fst longident_loc
-            ++ Fmt.sp ++ op "=" ++ Fmt.using snd core_type)
+            ++ op "=" ++ Fmt.using snd core_type)
               f (s, ct)
           in
           match cstrs with
@@ -157,10 +157,10 @@ module Make (Attrs : Format_types.ATTRS) = struct
     match label with
     | Nolabel -> core_type f c
     | Labelled s ->
-        (Fmt.using fst Fmt.string ++ sep ":" ++ Fmt.using snd core_type_parens)
+        (Fmt.using fst Fmt.string ++ sep ": " ++ Fmt.using snd core_type_parens)
           f (s, c)
     | Optional s ->
-        (fstr "?" ++ Fmt.using fst Fmt.string ++ sep ":"
+        (fstr "?" ++ Fmt.using fst Fmt.string ++ sep ": "
         ++ Fmt.using snd core_type_parens)
           f (s, c)
 end

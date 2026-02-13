@@ -81,12 +81,8 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
     val mutable current_depth : int = 0 
     val mutable context_stack : string StringMap.t Stack.t = Stack.create () 
     val mutable global_map : string StringMap.t = StringMap.empty
-    method private guess_matches (n : string) : bool =
-      match Common.get Guess_var !config with
-      | Some pattern ->
-          let regex = Re.Str.regexp pattern in
-          Re.Str.string_match regex n 0
-      | None -> false
+    method private guess_matches (_n : string) : bool =
+      false
     method push_context () : note =
       let depth = current_depth + 1 in
       current_depth <- depth ;
@@ -197,7 +193,7 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
         | name''' -> name''' in
       let (res, b) =
         (match ctx with
-        | Type when Common.is_flag_enabled (Common.get Rename_types !config) -> (
+        | Type when Common.is_flag_enabled (Common.get (Convert_flag Rename_types) !config) -> (
             let rec process_parts parts =
               match parts with
               | [] -> []
@@ -207,27 +203,17 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
             let new_name = process_parts name' in
             (new_name, true)
           )
-        | Functor when Common.is_flag_enabled (Common.get Make_make_functor !config) -> (
-            let rec process_parts parts =
-              match parts with
-              | [] -> []
-              | [ last ] -> [ "Make_" ^ last ]
-              | first :: rest -> first :: process_parts rest
-            in
-            let new_name = process_parts name' in
-            (new_name, true)
-          )
         | Functor -> (name', false)
-        | PatternHead when Common.is_flag_enabled (Common.get Guess_pattern !config) -> let res = map_last process_uppercase name' in (res, name' <> res)
-        | PatternTail when Common.is_flag_enabled (Common.get Convert_names !config) -> begin match name' with
+        | PatternHead -> let res = map_last process_uppercase name' in (res, name' <> res)
+        | PatternTail when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) -> begin match name' with
             | [ last ] -> let res = process_lowercase last in ( [ res ], last <> res)
             | _ -> (name', false)
           end
-        | Value when Common.is_flag_enabled (Common.get Convert_names !config) -> begin match name' with
+        | Value when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) -> begin match name' with
             | [ last ] -> let res = process_lowercase last in ( [ res ], last <> res)
             | _ -> (name', false)
           end
-        | Constructor when Common.is_flag_enabled (Common.get Convert_names !config) ->
+        | Constructor when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) ->
             (* Map SML basis constructors to OCaml equivalents *)
             let mapped_name = match name' with
               | ["SOME"] -> ["Some"]
@@ -253,7 +239,7 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
         )
           in 
       let (scope, basename) = self#split_name res in
-      let (res0, res1) = (if (is_keyword) (String.lowercase_ascii basename) && Common.is_flag_enabled (Common.get Convert_keywords !config) then
+      let (res0, res1) = (if (is_keyword) (String.lowercase_ascii basename) && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) !config) then
         let new_basename = basename ^ "_" in
         let full_name = scope @ [ new_basename ] in
         (self#build_longident full_name, b)
@@ -275,7 +261,7 @@ end
 
 module Make (Config : CONFIG) = struct
   let process_special (name : string list) : string list option = 
-    if not @@ Common.engaged @@ Common.get Toplevel_names Config.config then 
+    if not @@ Common.engaged @@ Common.get (Convert_flag Toplevel_names) Config.config then
       None 
     else 
       match name with 
@@ -307,21 +293,9 @@ module Make (Config : CONFIG) = struct
 
   let process_name ~(ctx : context) (name : string list) : Ppxlib.Longident.t * bool =
     let name = if List.exists (fun s -> String.ends_with s ~suffix:"_") name then List.map (fun s -> s ^ "__") name else name in
-    begin match process_special name with
-      | Some res -> build_longident_from_list res, true
-      | None ->
-    match name with
-    | [ name ] when in_core_lang ctx ->
-        (match Common.get Guess_var Config.config with
-        | Some regex ->
-            if Re.Str.string_match (Re.Str.regexp ("^" ^ regex ^ "$")) name 0 then
-              let newname = String.uncapitalize_ascii name ^ "_" in
-              (Longident.Lident newname, true)
-            else
-              namer#process_name ~ctx ~name:[name]
-        | None -> namer#process_name ~ctx ~name:[name])
-    | _ -> namer#process_name ~ctx ~name
-            end
+    match process_special name with
+    | Some res -> build_longident_from_list res, true
+    | None -> namer#process_name ~ctx ~name
 
   let to_string ~(ctx : context) (name_parts : string list) : string =
     Ppxlib.Longident.last_exn (process_name ~ctx name_parts |> fst)
@@ -352,11 +326,8 @@ module Make (Config : CONFIG) = struct
 
   let get_name (from : string) : string = namer#get_name from
 
-  let matches_pattern (name : string) : bool =
-    match Common.get Guess_var Config.config with
-    | Some regex ->
-        Re.Str.string_match (Re.Str.regexp ("^" ^ regex ^ "$")) name 0
-    | None -> false  
+  let matches_pattern (_name : string) : bool =
+    false
 end
 
 (* Context aliases for convenience *)

@@ -4,4 +4,7 @@
   (flags (:standard -warn-error -A))
   )
  (release
-  (flags (:standard -w -A))))
+  (flags (:standard -w -A))
+  (ocamlopt_flags (:standard -O3)))
+ (trace
+  (ocamlopt_flags (:standard -P a))))

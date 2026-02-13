@@ -24,7 +24,7 @@ type constructor_info = {
       (** Module path including constructor name (e.g., ["Result"; "ok"]) *)
   ocaml_name : string;  (** Transformed OCaml name (e.g., "Ok_") *)
 }
-[@@deriving sexp]
+[@@deriving sexp, eq, ord]
 
 type t
 (** The constructor registry type *)
@@ -46,6 +46,9 @@ val add_module_alias : t -> alias:string list -> target:string list -> unit
 (** Register a module alias. After
     [add_module_alias t ~alias:["I"] ~target:["M"]], constructors in M become
     accessible via I. For example, M.Root becomes accessible as I.Root. *)
+
+val merge : t -> t -> t
+(** Merge two registries into a fresh one containing entries from both *)
 
 val get_all_constructors : t -> constructor_info list
 (** Get all constructors from the registry *)

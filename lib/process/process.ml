@@ -30,11 +30,11 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
     method set_store s = store <- s
 
     method private get_output_path : Fpath.t option =
-      match Common.get Output_file cfg with
+      match Common.get (File_flag Output_file) cfg with
       | FileOut path ->
           let fpath = Fpath.v path in
           let path' =
-            if Common.get Dash_to_underscore cfg then
+            if Common.get (Misc_flag Dash_to_underscore) cfg then
               Common.convert_path_dashes_to_underscores fpath
             else fpath
           in
@@ -66,7 +66,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
         output modes (file, stdout, silent). *)
 
     method private load_input_context : unit =
-      match Common.get Context_input cfg with
+      match Common.get (File_flag Context_input) cfg with
       | Some path -> (
           try
             let modules =
@@ -93,7 +93,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
       | None -> ()
 
     method private write_output_context : unit =
-      match Common.get Context_output cfg with
+      match Common.get (File_flag Context_output) cfg with
       | Some path -> (
           try
             Context.Constructor_manifest.write_combined_file path
@@ -193,7 +193,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
               (* Record success/warning/failure *)
               self#record_check_result file checked;
               (* Write immediately if not concat mode *)
-              if not (Common.get Concat_output cfg) then
+              if not (Common.get (Misc_flag Concat_output) cfg) then
                 ignore (self#write_output ocaml_code);
               ocaml_code
             with e ->
@@ -205,7 +205,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
           files
       in
       (* In concat mode, write all results at once *)
-      if Common.get Concat_output cfg then
+      if Common.get (Misc_flag Concat_output) cfg then
         ignore (self#write_output @@ String.concat "\n\n\n" res);
 
       (* Log summary *)
@@ -230,7 +230,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
     (** Process multiple files, collecting their outputs. *)
 
     method private log_verbose (msg : string) : unit =
-      if Common.get Verbosity cfg > 2 then
+      if Common.get (Shell_flag Verbosity) cfg > 2 then
         Log.log_with ~cfg ~level:Low ~kind:Neutral ~msg ()
     (** Log verbose message if verbosity level is high enough. *)
 
@@ -245,26 +245,33 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
       let content = really_input_string ic (in_channel_length ic) in
       close_in ic;
 
-      (* Create processor and run pipeline *)
-      let process = new process_file cfg in
+      (* Create processor and run pipeline, passing accumulated store *)
+      let process = new process_file ~store cfg in
       let sml_ast = process#parse_sml content in
       self#log_verbose "Finished parsing SML AST.";
 
       let ocaml_ast = process#convert_to_ocaml sml_ast in
       self#log_verbose "Finished converting to OCaml AST.";
 
-      (* Accumulate constructors for combined context output *)
+      (* Accumulate constructors for combined context output and feed back into store *)
       let constructors = process#get_constructors in
       if constructors <> [] then begin
         let module_path =
-          match Common.get Output_file cfg with
+          match Common.get (File_flag Output_file) cfg with
           | FileOut p -> p
           | _ -> file
         in
         accumulated_contexts <-
           Context.Constructor_manifest.
             [{ module_path; constructors }]
-          :: accumulated_contexts
+          :: accumulated_contexts;
+        (* Merge discovered constructors back into the shared store *)
+        List.iter
+          (fun (ci : Context.Constructor_registry.constructor_info) ->
+            Context.Constructor_registry.add_constructor
+              store.constructor_registry ~path:ci.path ~name:ci.name
+              ~ocaml_name:ci.ocaml_name)
+          constructors
       end;
 
       let ocaml_code' = process#print_ocaml ocaml_ast in
@@ -275,7 +282,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
 
       (* Validate if requested *)
       let checked =
-        if Common.get Check_ocaml cfg then
+        if Common.get (Misc_flag Check_ocaml) cfg then
           Process_common.check_output ~config:cfg ocaml_code
         else Process_common.Good
       in

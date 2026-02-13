@@ -8,7 +8,7 @@ val path_to_string : path -> string
 val string_to_path : string -> path
 
 val convert_file :
-  input_files:path list -> ?output_file:path -> options:Common.t -> int
+  input_files:path list -> ?output_file:path -> ?store:Context.t -> options:Common.t -> int
 (** Convert a single SML file to OCaml.
 
     This function handles the end-to-end conversion of a single SML source file

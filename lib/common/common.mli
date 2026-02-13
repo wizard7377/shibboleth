@@ -89,25 +89,25 @@ val convert_path_dashes_to_underscores : Fpath.t -> Fpath.t
 include module type of Config_lib
 
 (** Logger types *)
-type level = Logger.level = High | Medium | Low | Debug
+type log_level = Logger.level = High | Medium | Low | Debug
 
 type kind = Logger.kind = Positive | Negative | Neutral | Warning
 
-module type LOG = sig 
+module type LOG = sig
     val log :
-    ?subgroup:string -> ?level:level -> ?kind:kind -> msg:string -> unit -> unit
+    ?subgroup:string -> ?level:log_level -> ?kind:kind -> msg:string -> unit -> unit
 
   val log_with :
     cfg:t ->
     ?subgroup:string ->
-    ?level:level ->
+    ?level:log_level ->
     ?kind:kind ->
     msg:string ->
     unit ->
     unit
   val log_fmt :
     ?subgroup:string ->
-    ?level:level ->
+    ?level:log_level ->
     ?kind:kind ->
     msg:(unit Fmt.t) ->
     unit ->

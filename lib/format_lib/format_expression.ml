@@ -27,7 +27,7 @@ module Make
       | Pexp_let (rf, l, e) ->
           (box 2
              (parens
-                (Fmt.using fst bindings ++ Fmt.sp ++ kwd "in" ++ Fmt.sp
+                (Fmt.using fst bindings ++ Fmt.sp ++ kwd "in"
                ++ Fmt.using snd expression)))
             f
             ((rf, l), e)
@@ -54,19 +54,19 @@ module Make
                ++ Fmt.using snd case_list)))
             f (e, cases)
       | Pexp_tuple l ->
-          (hvbox (parens (list expression ~sep:(comma ++ Fmt.sp)))) f l
+          (hvbox (parens (list expression ~sep:(fun f () -> Fmt.string f ","; Fmt.sp f ())))) f l
       | Pexp_construct _ when is_simple_construct (view_expr x) -> (
           match view_expr x with
           | `nil -> Fmt.string f "[]"
           | `tuple -> Fmt.string f "()"
           | `list xs ->
-              (Fmt.hvbox (brackets (list expression ~sep:(semi ++ Fmt.sp)))) f xs
+              (Fmt.hvbox (brackets (list expression ~sep:(fun f () -> Fmt.string f ";"; Fmt.sp f ())))) f xs
           | `simple x -> longident f x
           | _ -> assert false)
       | Pexp_construct (li, None) -> longident_loc f li
       | Pexp_construct (li, Some eo) -> (
           match view_expr x with
-          | `cons ls -> (parens (list expression ~sep:(Fmt.sp ++ op "::"))) f ls
+          | `cons ls -> (parens (list expression ~sep:(op "::"))) f ls
           | _ ->
               (box 2
                  (parens
@@ -90,7 +90,7 @@ module Make
             | _ ->
                 (hvbox
                    (Fmt.using fst longident_loc
-                   ++ Fmt.sp ++ op "=" ++ Fmt.using snd expression))
+                   ++ op "=" ++ Fmt.using snd expression))
                   f (li, e)
           in
           Fmt.hvbox
@@ -100,7 +100,7 @@ module Make
                   Fmt.string f "{";
                   Fmt.sp f ();
                   option ~last:(Fmt.sp ++ kwd "with") expression f eo;
-                  list longident_x_expression ~sep:(semi ++ Fmt.sp) f l;
+                  list longident_x_expression ~sep:(fun f () -> Fmt.string f ";"; Fmt.sp f ()) f l;
                   Fmt.string f "}")
                 f ();
               Fmt.sp f ())
@@ -117,7 +117,7 @@ module Make
                 (Fmt.using (fun (e1, _, _) -> e1) expression_parens
                 ++ fstr "."
                 ++ Fmt.using (fun (_, li, _) -> li) longident_loc
-                ++ Fmt.sp ++ op "<-"
+                ++ op "<-"
                 ++ Fmt.using (fun (_, _, e2) -> e2) expression)))
             f (e1, li, e2)
       | Pexp_array l ->
@@ -143,14 +143,15 @@ module Make
               else_part f eo)
             f (e1, e2, eo)
       | Pexp_sequence (e1, e2) ->
-          block
-            (fun f (e1, e2) ->
-              Fmt.sp f ();
-              expression f e1;
-              semi f ();
-              Fmt.sp f ();
-              expression f e2;
-              Fmt.sp f ())
+          Fmt.vbox ~indent:2
+            (block
+               (fun f (e1, e2) ->
+                 Fmt.cut f ();
+                 expression f e1;
+                 semi f ();
+                 Fmt.cut f ();
+                 expression f e2;
+                 Fmt.cut f ()))
             f (e1, e2)
       | Pexp_while (e1, e2) ->
           block
@@ -217,13 +218,13 @@ module Make
       | Pexp_setinstvar (s, e) ->
           (hvbox
              (parens
-                (Fmt.using fst Fmt.string ++ Fmt.sp ++ op "<-"
+                (Fmt.using fst Fmt.string ++ op "<-"
                ++ Fmt.using snd expression)))
             f (s.txt, e)
       | Pexp_override l ->
           let string_x_expression f (s, e) =
             (hvbox
-               (Fmt.using fst Fmt.string ++ Fmt.sp ++ op "="
+               (Fmt.using fst Fmt.string ++ op "="
               ++ Fmt.using snd expression))
               f (s.txt, e)
           in
@@ -234,7 +235,7 @@ module Make
              (parens
                 (kwd "let" ++ kwd "module"
                 ++ Fmt.using (fun (s, _, _) -> s) Fmt.string
-                ++ Fmt.sp ++ op "="
+                ++ op "="
                 ++ Fmt.using (fun (_, me, _) -> me) ME.module_expr
                 ++ Fmt.sp ++ kwd "in"
                 ++ Fmt.using (fun (_, _, e) -> e) expression)))
@@ -255,7 +256,7 @@ module Make
              (parens
                 (kwd "fun"
                 ++ Fmt.using fst (parens (kwd "type" ++ Fmt.string))
-                ++ Fmt.sp ++ op "->" ++ Fmt.using snd expression)))
+                ++ op "->" ++ Fmt.using snd expression)))
             f (lid.txt, e)
       | Pexp_pack me -> (parens (kwd "module" ++ ME.module_expr)) f me
       | Pexp_open (o, e) ->
@@ -296,8 +297,7 @@ module Make
               Fmt.sp f ();
               expression_parens f e;
               Fmt.sp f ();
-              Fmt.string f ":";
-              Fmt.sp f ();
+              Fmt.string f ": ";
               CT.core_type f ct;
               Fmt.string f ")")
             f (e, ct)
@@ -378,7 +378,7 @@ module Make
 
   and label_exp f (l, opt, p) =
     match l with
-    | Nolabel -> (Pat.pattern_parens ++ Fmt.sp) f p
+    | Nolabel -> Pat.pattern_parens f p
     | Optional rest -> (
         match p with
         | { ppat_desc = Ppat_var { txt; _ }; ppat_attributes = [] }
@@ -388,10 +388,9 @@ module Make
                 (fstr "?"
                 ++ parens
                      (Fmt.using fst Fmt.string ++ op "="
-                    ++ Fmt.using snd expression)
-                ++ Fmt.sp)
+                    ++ Fmt.using snd expression))
                   f (rest, o)
-            | None -> (fstr "?" ++ Fmt.string ++ Fmt.sp) f rest)
+            | None -> (fstr "?" ++ Fmt.string) f rest)
         | _ -> (
             match opt with
             | Some o ->
@@ -402,23 +401,20 @@ module Make
                      (fun (_, p, o) -> (p, o))
                      (parens
                         (Fmt.using fst Pat.pattern ++ op "="
-                       ++ Fmt.using snd expression))
-                ++ Fmt.sp)
+                       ++ Fmt.using snd expression)))
                   f (rest, p, o)
             | None ->
                 (fstr "?" ++ Fmt.using fst Fmt.string ++ sep ":"
-                ++ Fmt.using snd Pat.pattern_parens
-                ++ Fmt.sp)
+                ++ Fmt.using snd Pat.pattern_parens)
                   f (rest, p)))
     | Labelled l -> (
         match p with
         | { ppat_desc = Ppat_var { txt; _ }; ppat_attributes = [] } when txt = l
           ->
-            (fstr "~" ++ Fmt.string ++ Fmt.sp) f l
+            (fstr "~" ++ Fmt.string) f l
         | _ ->
             (fstr "~" ++ Fmt.using fst Fmt.string ++ sep ":"
-            ++ Fmt.using snd Pat.pattern_parens
-            ++ Fmt.sp)
+            ++ Fmt.using snd Pat.pattern_parens)
               f (l, p))
 
   and label_x_expression f (l, e) =
@@ -445,17 +441,17 @@ module Make
 
   and case_list f l =
     let aux f { pc_lhs; pc_guard; pc_rhs } =
-      (Fmt.sp ++ fstr "| "
+      (Fmt.cut ++ fstr "| "
       ++ box 2
            (Fmt.using (fun (lhs, _, _) -> lhs) Pat.pattern
            ++ Fmt.using
                 (fun (_, guard, _) -> guard)
                 (option expression ~first:(Fmt.sp ++ kwd "when"))
-           ++ Fmt.sp ++ op "->"
+           ++ op "->"
            ++ Fmt.using (fun (_, _, rhs) -> rhs) expression))
         f (pc_lhs, pc_guard, pc_rhs)
     in
-    list aux f l ~sep:Fmt.nop
+    Fmt.vbox (fun f l -> list aux f l ~sep:Fmt.nop) f l
 
   and binding_op f x =
     match (x.pbop_pat, x.pbop_exp) with
@@ -470,7 +466,7 @@ module Make
            (Fmt.using (fun (op', _, _) -> op') Fmt.string
            ++ Fmt.sp
            ++ Fmt.using (fun (_, pat, _) -> pat) Pat.pattern
-           ++ Fmt.sp ++ op "="
+           ++ op "="
            ++ Fmt.using (fun (_, _, exp) -> exp) expression))
           f (x.pbop_op.txt, pat, exp)
 
@@ -498,7 +494,7 @@ module Make
 
   and binding_body f { pvb_pat = p; pvb_expr = x; _ } =
     let rec pp_print_pexp_function f x =
-      if x.pexp_attributes <> [] then (fstr "=" ++ expression) f x
+      if x.pexp_attributes <> [] then (fstr "=" ++ Fmt.sp ++ expression) f x
       else
         match x.pexp_desc with
         | Pexp_fun (label, eo, p, e) ->
@@ -517,14 +513,13 @@ module Make
             Fmt.string f ")";
             Fmt.sp f ();
             pp_print_pexp_function f e
-        | _ -> (fstr "=" ++ expression) f x
+        | _ -> (fstr "=" ++ Fmt.sp ++ expression) f x
     in
     match p with
     | { ppat_desc = Ppat_constraint (p, ty); ppat_attributes = [] } ->
         Pat.pattern_parens f p;
         Fmt.sp f ();
-        Fmt.string f ":";
-        Fmt.sp f ();
+        Fmt.string f ": ";
         CT.core_type f ty;
         Fmt.sp f ();
         Fmt.string f "=";

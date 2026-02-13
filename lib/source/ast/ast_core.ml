@@ -2388,6 +2388,10 @@ and expression =
 
           @see 'matching' Match clause structure *)
 
+  | PrimExp of string 
+
+  | FfiExp of ffi_name
+
 (** {2 Expression Rows}
 
     {[
@@ -2447,6 +2451,9 @@ and matching =
           - Optional next clause ([| pat2 => exp2])
 
           Pattern variables bound in [pat] are visible in [expression]. *)
+
+
+
 
 (** {2 Declarations}
 
@@ -2649,7 +2656,11 @@ and declaration =
           ]}
 
           @see 'fixity' Fixity specifications *)
+  
+  | PrimDec of string
+  | FfiDec of string * ffi_name
 
+  
 (** Operator fixity specifications.
 
     {[
@@ -3478,7 +3489,8 @@ and typ =
           ]}
 
           @see 'typ_row' Type row structure *)
-
+          
+  | TypPrim of string 
 (** Type rows in record types.
 
     {[
@@ -3722,3 +3734,26 @@ and pat_row =
             (* SML: x : int *)
             PatRowVar (x_id, Some int_typ, None, None)
           ]} *)
+and ffi_name = {
+    c_name : string;
+    kind: ffi_kind;
+    ty: typ list; 
+    attrs: ffi_attr list;
+  }
+and ffi_attr = 
+  | FFIAlloc 
+  | FFIPublic 
+  | FFIExternal 
+  | FFIPrivate 
+  | FFICDecl 
+  | FFIImpure 
+  | FFIPure 
+  | FFIReentrant
+  | FFIStdcall
+  
+and ffi_kind = 
+  | FFIAddress
+  | FFIImport 
+  | FFIExport
+  | FFISymbol 
+  | FFIUnknown

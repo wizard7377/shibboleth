@@ -71,7 +71,7 @@ let display_error_context_from_string ?(context = 4) (_filename : string)
 (** Extract output file path from configuration for error messages. Returns a
     descriptive string if not writing to a file. *)
 let get_output_file_path (config : Common.t) : string =
-  match Common.get Output_file config with
+  match Common.get (File_flag Output_file) config with
   | Common.FileOut path -> path
   | Common.StdOut -> "standard output"
   | Common.Silent -> "silent output"
@@ -106,7 +106,7 @@ let check_output ~(config : Common.t)
   with
   | Syntaxerr.Error e ->
       let source_files =
-        match Common.get Input_file config with
+        match Common.get (File_flag Input_file) config with
         | Common.File path -> String.concat " , " path
         | Common.StdIn -> "standard input"
       in
@@ -124,7 +124,7 @@ let check_output ~(config : Common.t)
       Bad e
   | Lexer.Error (_e, warn) ->
       let source_files =
-        match Common.get Input_file config with
+        match Common.get (File_flag Input_file) config with
         | Common.File path -> String.concat " , " path
         | Common.StdIn -> "standard input"
       in

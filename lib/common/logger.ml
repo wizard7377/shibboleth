@@ -44,15 +44,15 @@ module Make (C : S) : LOG = struct
      3. Verbosity level filtering (based on message importance) *)
   let get_should_print ?(subgroup = "") ?(cfg : Config_lib.t = C.config)
       (level : level) (kind : kind) : bool =
-    let debug_flags = Config_lib.get Debug cfg in
+    let debug_flags = Config_lib.get (Shell_flag Debug) cfg in
 
     (* Priority 1: Debug flags bypass everything *)
     if List.exists (matches_debug_flag ~group:C.group ~subgroup) debug_flags
     then true (* Priority 2: Quiet mode suppresses non-errors *)
-    else if Config_lib.get Quiet cfg && kind <> Negative then false
+    else if Config_lib.get (Shell_flag Quiet) cfg && kind <> Negative then false
     (* Priority 3: Verbosity level filtering *)
       else
-      let verbosity = Config_lib.get Verbosity cfg in
+      let verbosity = Config_lib.get (Shell_flag Verbosity) cfg in
       let level_value =
         match level with High -> 0 | Medium -> 1 | Low -> 2 | Debug -> 3
       in

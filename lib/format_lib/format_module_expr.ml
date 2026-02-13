@@ -26,14 +26,14 @@ module Make
       match x.pmod_desc with
       | Pmod_ident li -> longident_loc f li
       | Pmod_structure s ->
-          Fmt.hvbox ~indent:2
+          Fmt.vbox ~indent:2
             (fun f s ->
               Fmt.string f "struct";
-              Fmt.sp f ();
-              Fmt.box ~indent:0
-                (fun f s -> list structure_item ~sep:Fmt.sp f s)
+              Fmt.cut f ();
+              Fmt.vbox ~indent:0
+                (fun f s -> list structure_item ~sep:Fmt.cut f s)
                 f s;
-              Fmt.sp f ();
+              Fmt.cut f ();
               Fmt.string f "end")
             f s
       | Pmod_constraint (me, mt) ->
@@ -74,7 +74,7 @@ module Make
       | Pmod_unpack e -> (fstr "(val " ++ Expr.expression ++ fstr ")") f e
       | Pmod_extension e -> Attrs.extension f e
 
-  and structure f x = list ~sep:Fmt.sp structure_item f x
+  and structure f x = Fmt.vbox (fun f x -> list ~sep:Fmt.cut structure_item f x) f x
 
   and structure_item f x =
     begin match x.pstr_desc with
@@ -98,7 +98,7 @@ module Make
               | Named (s, mt) ->
                   Fmt.string f "(";
                   Fmt.string f (Option.value s.txt ~default:"_");
-                  Fmt.string f ":";
+                  Fmt.string f ": ";
                   MT.module_type f mt;
                   Fmt.string f ")");
               module_helper f me'
@@ -116,8 +116,7 @@ module Make
                  (me', ({ pmty_desc = Pmty_ident _ | Pmty_signature _; _ } as mt));
              pmod_attributes = [];
             } ->
-                Fmt.string f " :";
-                Fmt.sp f ();
+                Fmt.string f " : ";
                 MT.module_type f mt;
                 Fmt.sp f ();
                 Fmt.string f "=";
@@ -217,7 +216,7 @@ module Make
               Fmt.string f name;
               (match pmb.pmb_expr.pmod_desc with
               | Pmod_constraint (expr, typ) ->
-                  Fmt.string f ":";
+                  Fmt.string f ": ";
                   MT.module_type f typ;
                   Fmt.string f " = ";
                   module_expr f expr

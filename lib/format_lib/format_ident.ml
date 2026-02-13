@@ -58,17 +58,14 @@ let needs_spaces txt =
 
 let protect_ident txt =
   if not (needs_parens txt) then Fmt.string
-  else if needs_spaces txt then parens (Fmt.sp ++ Fmt.string ++ Fmt.sp)
-  else parens Fmt.string
+  else parens (Fmt.sp ++ Fmt.string ++ Fmt.sp)
 
 let rec longident f = function
   | Lident s -> protect_ident s f s
   | Ldot (y, s) ->
       longident f y;
       if not (needs_parens s) then (fstr "." ++ Fmt.string) f s
-      else if needs_spaces s then
-        (fstr "." ++ parens (Fmt.sp ++ Fmt.string ++ Fmt.sp)) f s
-      else (fstr "." ++ parens Fmt.string) f s
+      else (fstr "." ++ parens (Fmt.sp ++ Fmt.string ++ Fmt.sp)) f s
   | Lapply (y, s) ->
       longident f y;
       parens longident f s

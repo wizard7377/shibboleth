@@ -126,7 +126,7 @@ class process_file : ?store:Context.t -> Common.t -> object
       @return Parsed SML code representation
       @raise Parsing.Parse_error if the source is syntactically invalid *)
 
-  method convert_to_ocaml : sml_code -> ocaml_code
+  method convert_to_ocaml : ?header:string list -> sml_code -> ocaml_code
   (** [convert_to_ocaml sml] transforms SML AST to OCaml Parsetree.
 
       This phase:
@@ -157,6 +157,6 @@ class process_file : ?store:Context.t -> Common.t -> object
   (** [get_constructors] returns the constructors discovered during the last
       {!convert_to_ocaml} call. Empty before any conversion has been run. *)
 
-  method process_file : string -> string
+  method process_file : ?header:string list -> string -> string
   (** [process_file path] performs the complete conversion pipeline. *)
 end

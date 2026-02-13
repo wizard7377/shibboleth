@@ -66,7 +66,7 @@ module Make
             | _ ->
                 (box 2
                    (Fmt.using fst longident_loc
-                   ++ Fmt.sp ++ op "=" ++ Fmt.using snd pattern))
+                   ++ op "=" ++ Fmt.using snd pattern))
                   f (li, p)
           in
           let suffix = if closed = Asttypes.Closed then "" else ";_" in
@@ -83,7 +83,7 @@ module Make
       | Ppat_constraint (p, ct) ->
           (box 2
              (parens
-                (Fmt.using fst pattern ++ Fmt.sp ++ sep ":" ++ Fmt.sp
+                (Fmt.using fst pattern ++ Fmt.sp ++ sep ": "
                ++ Fmt.using snd CT.core_type)))
             f (p, ct)
       | Ppat_type li -> (fstr "#" ++ longident_loc) f li
