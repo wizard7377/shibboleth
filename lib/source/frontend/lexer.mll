@@ -111,7 +111,7 @@ rule token = parse
 
   (* Word literals: 0w for decimal, 0wx for hex *)
   | "0wx" hexnum as s    { HEX_LIT s }
-  | "0w" num as s        { INT_LIT s }
+  | "0w" num as s        { HEX_LIT s }
 
   (* Floating point literals with optional negation *)
   | '~' num '.' num 'e' '~' num as s  { FLOAT_LIT s }

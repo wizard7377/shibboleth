@@ -178,23 +178,29 @@ let rec resolve_precedence (items : expression node list) : resolved_exp =
 
           (* Extract operator and split sequence *)
           let left_items = take split_pos items in
-          let op_exp = List.nth items split_pos in
           let right_items = drop (split_pos + 1) items in
 
-          (* Extract operator identifier *)
-          let op_idx =
-            match extract_operator op_exp with
-            | Some idx -> idx
-            | None ->
-                failwith "impossible: split position should be an operator"
-          in
+          (* If either side is empty, the operator is used as a value
+             (e.g., val < = <), not as infix. Treat as application. *)
+          if left_items = [] || right_items = [] then
+            build_left_assoc_app items
+          else
+            let op_exp = List.nth items split_pos in
 
-          (* Recursively resolve left and right *)
-          let left_resolved = resolve_precedence left_items in
-          let right_resolved = resolve_precedence right_items in
+            (* Extract operator identifier *)
+            let op_idx =
+              match extract_operator op_exp with
+              | Some idx -> idx
+              | None ->
+                  failwith "impossible: split position should be an operator"
+            in
 
-          (* Build infix application *)
-          ResolvedInfix (left_resolved, op_idx, right_resolved))
+            (* Recursively resolve left and right *)
+            let left_resolved = resolve_precedence left_items in
+            let right_resolved = resolve_precedence right_items in
+
+            (* Build infix application *)
+            ResolvedInfix (left_resolved, op_idx, right_resolved))
 
 (** Resolved pattern structure after precedence resolution. *)
 type resolved_pat =

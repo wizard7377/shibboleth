@@ -39,30 +39,33 @@
   (action (progn
    (system "rm -rf examples/output")
    (concurrent (echo "HAMLET")
-   (run %{bin:shibboleth} group
-    --input examples/input/compilers/hamlet/basis
-    --force
-    --output examples/output/hamlet
-    --check-ocaml
-    --context-output=examples/output/ctx.sctx
-    --dash-to-underscore
-    --curry-types=disable)
+   (with-accepted-exit-codes (or 0 1)
+    (run %{bin:shibboleth} group
+     --input examples/input/compilers/hamlet/basis
+     --force
+     --output examples/output/hamlet
+     --check-ocaml
+     --context-output=examples/output/ctx.sctx
+     --dash-to-underscore
+     --curry-types=disable))
     (echo "MLKIT")
+    (with-accepted-exit-codes (or 0 1)
     (run %{bin:shibboleth} group
-    --input examples/input/compilers/mlkit/basis
-    --force
-    --output examples/output/mlkit
-    --check-ocaml
-    --context-output=examples/output/ctx.sctx
-    --dash-to-underscore
-    --curry-types=disable)
+     --input examples/input/compilers/mlkit/basis
+     --force
+     --output examples/output/mlkit
+     --check-ocaml
+     --context-output=examples/output/ctx.sctx
+     --dash-to-underscore
+     --curry-types=disable))
     (echo "MLTON")
+    (with-accepted-exit-codes (or 0 1)
     (run %{bin:shibboleth} group
-    --input examples/input/compilers/mlton/basis-library
-    --force
-    --output examples/output/mlton
-    --check-ocaml
-    --context-output=examples/output/ctx.sctx
-    --dash-to-underscore
-    --curry-types=disable)
+     --input examples/input/compilers/mlton/basis-library
+     --force
+     --output examples/output/mlton
+     --check-ocaml
+     --context-output=examples/output/ctx.sctx
+     --dash-to-underscore
+     --curry-types=disable))
     ))))

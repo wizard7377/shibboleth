@@ -47,10 +47,14 @@ let strip_type_var_prefix (s : string) : string =
     String.sub s 1 (String.length s - 1)
   else s
 
-(** Process a type variable name and return an OCaml type variable. *)
+(** Process a type variable name and return an OCaml type variable.
+    Escapes OCaml keywords (e.g. 'in -> in_, 'out -> out_). *)
 let process_type_var_name (s : string) : Parsetree.core_type =
   let stripped = strip_type_var_prefix s in
-  Builder.ptyp_var stripped
+  let escaped =
+    if Ppxlib.Keyword.is_keyword stripped then stripped ^ "_" else stripped
+  in
+  Builder.ptyp_var escaped
 
 (** Convert a list of SML type variable nodes to OCaml type parameters. *)
 let process_type_params (tvars : Ast.idx Ast.node list) :
@@ -59,7 +63,12 @@ let process_type_params (tvars : Ast.idx Ast.node list) :
     (fun (tv : Ast.idx Ast.node) ->
       let tv_str = idx_to_string tv.value in
       let var_name = strip_type_var_prefix tv_str in
-      (Builder.ptyp_var var_name, (Asttypes.NoVariance, Asttypes.NoInjectivity)))
+      let escaped =
+        if Ppxlib.Keyword.is_keyword var_name then var_name ^ "_"
+        else var_name
+      in
+      ( Builder.ptyp_var escaped,
+        (Asttypes.NoVariance, Asttypes.NoInjectivity) ))
     tvars
 
 (** {1 Capitalization Utilities}

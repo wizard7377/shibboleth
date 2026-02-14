@@ -620,7 +620,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                         Builder.pstr_type Asttypes.Recursive tb_decls;
                       ]
                 in
-                let mod_name = ghost (Some "_Types") in
+                let mod_name = ghost (Some "Types_") in
                 let mod_expr = Builder.pmod_structure type_items in
                 let body =
                   process_exp
@@ -636,7 +636,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 let type_items =
                   [ Builder.pstr_type Asttypes.Nonrecursive tdecls ]
                 in
-                let mod_name = ghost (Some "_Types") in
+                let mod_name = ghost (Some "Types_") in
                 let mod_expr = Builder.pmod_structure type_items in
                 let body =
                   process_exp
@@ -708,7 +708,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 let type_items =
                   [ Builder.pstr_type Asttypes.Recursive [ tdecl ] ]
                 in
-                let mod_name = ghost (Some "_Types") in
+                let mod_name = ghost (Some "Types_") in
                 let mod_expr = Builder.pmod_structure type_items in
                 let body =
                   process_exp
@@ -1103,12 +1103,14 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         let fields =
           List.flatten (List.map (fun r -> process_pat_row r.Ast.value) rows)
         in
-        Builder.ppat_record
-          (List.map
-             (fun (lab, pat) ->
-               (ghost (build_longident [ lab ]), pat))
-             fields)
-          Closed
+        if fields = [] then Builder.ppat_any
+        else
+          Builder.ppat_record
+            (List.map
+               (fun (lab, pat) ->
+                 (ghost (build_longident [ lab ]), pat))
+               fields)
+            Closed
     | PatArray pats -> Builder.ppat_array (List.map (fun p -> process_pat ~is_arg ~is_head p) pats)
     | PatList pats ->
         (* Build list pattern from right to left *)

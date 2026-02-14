@@ -16,7 +16,7 @@ type t = {
   verbosity : int; [@default 0]
   concat_output : bool; [@default false]
   force : bool; [@default false]
-  quiet : bool; [@default false]
+  quiet : bool; [@default true]
   debug : string list; [@default []]
   check_ocaml : bool; [@default false]
   dash_to_underscore : bool; [@default true]

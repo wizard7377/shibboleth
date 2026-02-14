@@ -38,7 +38,7 @@ let fixity_of_string s =
   let base = normalize_op_name s in
   match base with
   | "" -> `Normal
-  | b when List.mem b special_infix -> `Infix s
+  | b when List.mem b special_infix && s = b -> `Infix s
   | b when first_in infix_symbols b -> `Infix s
   | b when first_in [ '!'; '?'; '~' ] b -> `Prefix s
   | b when b.[0] = '.' -> `Mixfix s

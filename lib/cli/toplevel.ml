@@ -9,6 +9,35 @@ exception Dir_exists of path
 exception Input_output_same_dir of path
 exception Dir_create_error of path
 
+let rec styles (s : Fmt.style list) : 'a Fmt.t -> 'a Fmt.t =
+  match s with [] -> Fun.id | s :: r -> fun f -> Fmt.styled s (styles r f)
+
+let summary : (int * int * int) Fmt.t =
+  Fmt.vbox
+  Fmt.(
+       styled `Bold (const string "Conversion Complete:")
+       ++ cut
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> total - failures - warnings)
+               (const string "Successes:" ++ sp ++ styles [ `Green; `Bold ] int)
+            ) ++ cut
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> warnings)
+               (const string "Warnings:" ++ sp ++ styles [ `Yellow; `Bold ] int)
+            ) ++ cut 
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> failures)
+               (const string "Failures:" ++ sp ++ styles [ `Red; `Bold ] int)
+            ) ++ cut
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> total)
+               (const string "Total:" ++ sp ++ styles [ `Blue; `Bold ] int)
+            ) ++ cut)
+
 let path_to_string (p : path) : string = Fpath.to_string p
 let string_to_path (s : string) : path = Fpath.v s
 
@@ -31,20 +60,31 @@ let convert_file ~(input_files : path list) ?(output_file : path option)
           set (File_flag Input_file) input_files'';
           set (File_flag Output_file) output_target;
           set (Shell_flag Verbosity) (Common.get (Shell_flag Verbosity) options);
-          set (Convert_flag Convert_names) (Common.get (Convert_flag Convert_names) options);
-          set (Convert_flag Convert_keywords) (Common.get (Convert_flag Convert_keywords) options);
-          set (Convert_flag Rename_types) (Common.get (Convert_flag Rename_types) options);
-          set (Convert_flag Curry_expressions) (Common.get (Convert_flag Curry_expressions) options);
-          set (Convert_flag Curry_types) (Common.get (Convert_flag Curry_types) options);
-          set (Convert_flag Toplevel_names) (Common.get (Convert_flag Toplevel_names) options);
-          set (Misc_flag Concat_output) (Common.get (Misc_flag Concat_output) options);
+          set (Convert_flag Convert_names)
+            (Common.get (Convert_flag Convert_names) options);
+          set (Convert_flag Convert_keywords)
+            (Common.get (Convert_flag Convert_keywords) options);
+          set (Convert_flag Rename_types)
+            (Common.get (Convert_flag Rename_types) options);
+          set (Convert_flag Curry_expressions)
+            (Common.get (Convert_flag Curry_expressions) options);
+          set (Convert_flag Curry_types)
+            (Common.get (Convert_flag Curry_types) options);
+          set (Convert_flag Toplevel_names)
+            (Common.get (Convert_flag Toplevel_names) options);
+          set (Misc_flag Concat_output)
+            (Common.get (Misc_flag Concat_output) options);
           set (Shell_flag Force) (Common.get (Shell_flag Force) options);
           set (Shell_flag Quiet) (Common.get (Shell_flag Quiet) options);
           set (Shell_flag Debug) (Common.get (Shell_flag Debug) options);
-          set (Misc_flag Check_ocaml) (Common.get (Misc_flag Check_ocaml) options);
-          set (Misc_flag Dash_to_underscore) (Common.get (Misc_flag Dash_to_underscore) options);
-          set (File_flag Context_output) (Common.get (File_flag Context_output) options);
-          set (File_flag Context_input) (Common.get (File_flag Context_input) options);
+          set (Misc_flag Check_ocaml)
+            (Common.get (Misc_flag Check_ocaml) options);
+          set (Misc_flag Dash_to_underscore)
+            (Common.get (Misc_flag Dash_to_underscore) options);
+          set (File_flag Context_output)
+            (Common.get (File_flag Context_output) options);
+          set (File_flag Context_input)
+            (Common.get (File_flag Context_input) options);
         ]
   in
   let process =
@@ -122,7 +162,8 @@ let copy_file ?(force = false) (src : path) (dst : path) : unit =
       else ()
 
 (* Directory, normal, source, cm *)
-let partition_files (files : path list) : path list * path list * path list * path list =
+let partition_files (files : path list) :
+    path list * path list * path list * path list =
   let dirs, rest = List.partition is_directory files in
   let source_files, rest' =
     List.partition
@@ -253,7 +294,9 @@ let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
   let all_files = list_contents_rec input_dir in
   (* Make paths absolute for partition_files by joining with input_dir *)
   let all_files_abs = List.map (fun f -> Fpath.( // ) input_dir f) all_files in
-  let dirs, normal_files, source_files, cm_files = partition_files all_files_abs in
+  let dirs, normal_files, source_files, cm_files =
+    partition_files all_files_abs
+  in
   (* Convert back to relative paths *)
   let to_relative p =
     match Fpath.rem_prefix input_dir p with Some rel -> rel | None -> p
@@ -268,40 +311,41 @@ let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
   let _ =
     List.iter
       (fun f ->
-        copy_file ~force:(Common.get (Shell_flag Force) options) (Fpath.( // ) input_dir f)
+        copy_file
+          ~force:(Common.get (Shell_flag Force) options)
+          (Fpath.( // ) input_dir f)
           (Fpath.( // ) output_dir f))
       normal_files_rel
   in
   (* Convert .cm files to dune files *)
-  let _ = try begin
-    List.iter
-      (fun f ->
-        let cm_path = Fpath.( // ) input_dir f in
-        match Bos.OS.File.read cm_path with
-        | Ok content ->
-            let dir_name =
-              Fpath.parent f |> Fpath.rem_empty_seg |> Fpath.basename
-            in
-            let parsed = Pkg.Cm.parse content in
-            
-            let dune_content = Pkg.Cm.to_dune ~cfg:options ~dir_name parsed in 
-            let dune_path =
-              Fpath.( // ) output_dir (Fpath.( // ) (Fpath.parent f) (Fpath.v "dune"))
-            in
-            Bos.OS.File.write dune_path dune_content |> ignore
-        | Error _ -> ()
-      )
-      cm_files_rel
-          end with 
-          _ -> ()
+  let _ =
+    try
+      begin
+        List.iter
+          (fun f ->
+            let cm_path = Fpath.( // ) input_dir f in
+            match Bos.OS.File.read cm_path with
+            | Ok content ->
+                let dir_name =
+                  Fpath.parent f |> Fpath.rem_empty_seg |> Fpath.basename
+                in
+                let parsed = Pkg.Cm.parse content in
+
+                let dune_content =
+                  Pkg.Cm.to_dune ~cfg:options ~dir_name parsed
+                in
+                let dune_path =
+                  Fpath.( // ) output_dir
+                    (Fpath.( // ) (Fpath.parent f) (Fpath.v "dune"))
+                in
+                Bos.OS.File.write dune_path dune_content |> ignore
+            | Error _ -> ())
+          cm_files_rel
+      end
+    with _ -> ()
   in
   let failures, warnings, total =
     process_sml_files input_dir output_dir source_files_rel options
   in
-  let () =
-    Printf.printf
-      "Conversion complete: %d successes, %d warnings, %d failures %d total.\n"
-      (total - failures - warnings)
-      warnings failures total
-  in
+  let () = summary Format.err_formatter (failures, warnings, total) in
   if failures = 0 then 0 else 1
