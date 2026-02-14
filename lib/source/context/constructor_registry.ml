@@ -7,10 +7,12 @@ type constructor_info = {
 }
 [@@deriving sexp, eq, ord]
 
+module StringSet = Set.Make(String)
+
 type t = {
   qualified : (string, constructor_info) Hashtbl.t;
   unqualified : (string, constructor_info list) Hashtbl.t;
-  by_module : (string, string list) Hashtbl.t;
+  by_module : (string, StringSet.t) Hashtbl.t;
 }
 
 let join_path path = String.concat "." path
@@ -41,10 +43,9 @@ let add_constructor registry ~path ~name ~ocaml_name =
   | mod_name :: _ when List.length path > 1 ->
       let existing =
         Hashtbl.find_opt registry.by_module mod_name
-        |> Option.value ~default:[]
+        |> Option.value ~default:StringSet.empty
       in
-      if not (List.mem key existing) then
-        Hashtbl.replace registry.by_module mod_name (key :: existing)
+      Hashtbl.replace registry.by_module mod_name (StringSet.add key existing)
   | _ -> ());
 
   (* Also add to unqualified lookup table for local scope access *)
@@ -74,9 +75,9 @@ let open_module registry ~module_path =
   | mod_name :: _ ->
       let keys =
         Hashtbl.find_opt registry.by_module mod_name
-        |> Option.value ~default:[]
+        |> Option.value ~default:StringSet.empty
       in
-      List.iter
+      StringSet.iter
         (fun key ->
           match Hashtbl.find_opt registry.qualified key with
           | None -> ()
@@ -98,16 +99,16 @@ let add_module_alias registry ~alias ~target =
   (* Use module index to find only constructors in the target module *)
   let keys =
     match target with
-    | [] -> []
+    | [] -> StringSet.empty
     | mod_name :: _ ->
         Hashtbl.find_opt registry.by_module mod_name
-        |> Option.value ~default:[]
+        |> Option.value ~default:StringSet.empty
   in
   let entries_to_add =
-    List.filter_map
-      (fun key ->
+    StringSet.fold
+      (fun key acc ->
         match Hashtbl.find_opt registry.qualified key with
-        | None -> None
+        | None -> acc
         | Some info ->
             if has_prefix target info.path then
               let suffix =
@@ -120,9 +121,9 @@ let add_module_alias registry ~alias ~target =
                 drop target_len info.path
               in
               let new_path = alias @ suffix in
-              Some (new_path, info)
-            else None)
-      keys
+              (new_path, info) :: acc
+            else acc)
+      keys []
   in
   List.iter
     (fun (new_path, info) ->
@@ -132,19 +133,40 @@ let add_module_alias registry ~alias ~target =
     entries_to_add
 
 let merge t1 t2 =
-  let merged = create () in
-  (* Copy all entries from t1, then t2, using add_constructor to keep
-     all three tables (qualified, unqualified, by_module) consistent *)
-  Hashtbl.iter
-    (fun _key info ->
-      add_constructor merged ~path:info.path ~name:info.name
-        ~ocaml_name:info.ocaml_name)
-    t1.qualified;
-  Hashtbl.iter
-    (fun _key info ->
-      add_constructor merged ~path:info.path ~name:info.name
-        ~ocaml_name:info.ocaml_name)
-    t2.qualified;
+  let len1 = Hashtbl.length t1.qualified in
+  let len2 = Hashtbl.length t2.qualified in
+  let merged = {
+    qualified = Hashtbl.create (len1 + len2);
+    unqualified = Hashtbl.create (len1 + len2);
+    by_module = Hashtbl.create (Hashtbl.length t1.by_module + Hashtbl.length t2.by_module);
+  } in
+  (* Copy qualified: t2 overwrites t1 on conflict *)
+  Hashtbl.iter (fun k v -> Hashtbl.replace merged.qualified k v) t1.qualified;
+  Hashtbl.iter (fun k v -> Hashtbl.replace merged.qualified k v) t2.qualified;
+  (* Merge unqualified: concatenate info lists *)
+  let merge_unqualified src =
+    Hashtbl.iter (fun name infos ->
+      let existing =
+        Hashtbl.find_opt merged.unqualified name
+        |> Option.value ~default:[]
+      in
+      Hashtbl.replace merged.unqualified name (infos @ existing)
+    ) src.unqualified
+  in
+  merge_unqualified t1;
+  merge_unqualified t2;
+  (* Merge by_module: union the sets *)
+  let merge_by_module src =
+    Hashtbl.iter (fun mod_name keys ->
+      let existing =
+        Hashtbl.find_opt merged.by_module mod_name
+        |> Option.value ~default:StringSet.empty
+      in
+      Hashtbl.replace merged.by_module mod_name (StringSet.union existing keys)
+    ) src.by_module
+  in
+  merge_by_module t1;
+  merge_by_module t2;
   merged
 
 let get_all_constructors registry =

@@ -74,7 +74,8 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
     match field.value with
     | Ast.TypRow (name, ty, rest) -> (
         let label_name =
-          name_to_string (Backend_utils.idx_to_name name.value)
+          Backend_utils.process_lowercase
+            (name_to_string (Backend_utils.idx_to_name name.value))
         in
         let here : Parsetree.object_field =
           Builder.otag (ghost label_name) (process_type_value ty)
@@ -89,7 +90,8 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
     match field.value with
     | Ast.TypRow (name, ty, rest) ->
         let label_name =
-          name_to_string (Backend_utils.idx_to_name name.value)
+          Backend_utils.process_lowercase
+            (name_to_string (Backend_utils.idx_to_name name.value))
         in
         let here : Parsetree.label_declaration =
           Ast_helper.Type.field ~loc:Helpers.empty_loc

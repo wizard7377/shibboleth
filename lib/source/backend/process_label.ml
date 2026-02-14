@@ -53,12 +53,26 @@ let rec get_all_comments (lexbuf : string) : (string * int * int) list =
 module StringSet = Set.Make(String)
 
 class process_label opts lexbuf =
+  let _all_comments = get_all_comments lexbuf in
+  let _comment_positions_by_text =
+    let tbl = Hashtbl.create (List.length _all_comments) in
+    List.iter (fun (text, start, _) ->
+      let existing = Hashtbl.find_opt tbl text |> Option.value ~default:[] in
+      Hashtbl.replace tbl text (start :: existing)
+    ) _all_comments;
+    (* Reverse so positions are in source order *)
+    Hashtbl.iter (fun k v -> Hashtbl.replace tbl k (List.rev v)) tbl;
+    tbl
+  in
   object (self)
     val config : Common.t = opts
-    val mutable comments : (string * int * int) list = get_all_comments lexbuf
+    val mutable comments : (string * int * int) list = _all_comments
 
     (** Read-only copy of all comments for position lookups *)
-    val all_original_comments : (string * int * int) list = get_all_comments lexbuf
+    val all_original_comments : (string * int * int) list = _all_comments
+
+    (** Index from comment text to list of start positions (source order) *)
+    val comment_positions_by_text : (string, int list) Hashtbl.t = _comment_positions_by_text
 
     (** Set of comment texts already emitted, keyed by "text@position" to avoid
         deduplicating genuinely repeated comments at different positions *)
@@ -159,34 +173,39 @@ class process_label opts lexbuf =
       Builder.attribute ~name:attr_name ~payload:attr_payload
 
     method private lookup_comment_position (text : string) : int =
-      match List.find_opt (fun (t, _, _) -> t = text) all_original_comments with
-      | Some (_, start, _) -> start
-      | None -> 0
+      match Hashtbl.find_opt comment_positions_by_text text with
+      | Some (start :: _) -> start
+      | _ -> 0
 
     (** Make a dedup key for a comment at a known position *)
     method private make_dedup_key (text : string) (pos : int) : string =
       text ^ "@" ^ string_of_int pos
 
     (** Check if a comment text has already been emitted (by any path).
-        Uses position-based matching against the original comment list. *)
+        Uses the position index for O(k) lookup where k = occurrences of this text. *)
     method private is_already_emitted (text : string) : bool =
-      (* Check if any instance of this text has been marked as emitted *)
-      List.exists (fun (t, start, _) ->
-        t = text && StringSet.mem (self#make_dedup_key t start) emitted_comment_keys
-      ) all_original_comments
+      match Hashtbl.find_opt comment_positions_by_text text with
+      | None -> false
+      | Some positions ->
+          List.exists (fun start ->
+            StringSet.mem (self#make_dedup_key text start) emitted_comment_keys
+          ) positions
 
     (** Mark a comment at a specific position as emitted *)
     method private mark_emitted_at_pos (text : string) (pos : int) : unit =
       emitted_comment_keys <- StringSet.add (self#make_dedup_key text pos) emitted_comment_keys
 
-    (** Mark a comment by text as emitted (finds first unEmitted position) *)
+    (** Mark a comment by text as emitted (finds first unemitted position) *)
     method private mark_emitted (text : string) : unit =
-      match List.find_opt (fun (t, start, _) ->
-        t = text && not (StringSet.mem (self#make_dedup_key t start) emitted_comment_keys)
-      ) all_original_comments with
-      | Some (_, start, _) ->
-          emitted_comment_keys <- StringSet.add (self#make_dedup_key text start) emitted_comment_keys
+      match Hashtbl.find_opt comment_positions_by_text text with
       | None -> ()
+      | Some positions ->
+          match List.find_opt (fun start ->
+            not (StringSet.mem (self#make_dedup_key text start) emitted_comment_keys)
+          ) positions with
+          | Some start ->
+              emitted_comment_keys <- StringSet.add (self#make_dedup_key text start) emitted_comment_keys
+          | None -> ()
 
     method cite :
         'a. 'a citer -> string list -> 'a -> 'a =
@@ -213,7 +232,7 @@ class process_label opts lexbuf =
                     self#mark_emitted c;
                     (c, self#lookup_comment_position c)) fresh_comments
                 in
-                pending_comments <- pending_comments @ with_positions;
+                pending_comments <- List.rev_append with_positions pending_comments;
                 x (* Return unchanged *))
 
     method until : Lexing.position -> Attr.attr list =

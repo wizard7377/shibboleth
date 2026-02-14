@@ -480,7 +480,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
               match r.Ast.value with
               | Ast.Row (lab, expression, _) ->
                   let lab_longident =
-                    build_longident (idx_to_name lab.value)
+                    build_longident (List.map process_lowercase (idx_to_name lab.value))
                   in
                   (ghost lab_longident, process_exp expression))
             rows
@@ -518,7 +518,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           (* #label -> fun r -> r#label (for records/objects) *)
           let r_pat = Builder.ppat_var (ghost "r") in
           let r_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "r")) in
-          let lab_str' = sanitize_ident lab_str in
+          let lab_str' = process_lowercase (sanitize_ident lab_str) in
           let field_exp = Builder.pexp_send r_exp (ghost @@ lab_str') in
           Builder.pexp_fun Nolabel None r_pat field_exp
         in
@@ -813,7 +813,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     let res = match row.value with
     | Row (lab, expression, rest_opt) ->
         let lab_longident =
-          build_longident (idx_to_name lab.value)
+          build_longident (List.map process_lowercase (idx_to_name lab.value))
         in
         (ghost lab_longident, process_exp expression) in
     res
@@ -1166,7 +1166,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         []
     | PatRowSimple (lab, pat, rest) -> (
         let lab_str =
-          name_to_string (idx_to_name lab.value)
+          process_lowercase (name_to_string (idx_to_name lab.value))
         in
         let pat' = process_pat pat in
         let here = (lab_str, pat') in
@@ -1175,7 +1175,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | other -> here :: process_pat_row other)
     | PatRowVar (id, ty_opt, as_opt, rest_opt) -> (
         (* {x, y} is shorthand for {x = x, y = y} *)
-        let id_str = name_to_string (idx_to_name id.value) in
+        let id_str = process_lowercase (name_to_string (idx_to_name id.value)) in
         let var_pat = Builder.ppat_var (ghost id_str) in
         let pat_with_type =
           match ty_opt with

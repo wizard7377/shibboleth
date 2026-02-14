@@ -16,6 +16,22 @@
     --context-output=examples/output/ctx.sctx
     --dash-to-underscore
     --curry-types=disable))))
+
+(rule
+ (alias compilers)
+ (deps
+  (source_tree examples/input/compilers))
+ (action
+  (progn
+   (system "rm -rf examples/output")
+   (run %{bin:shibboleth} group
+    --input examples/input/compilers
+    --force
+    --output examples/output/compilers
+    --check-ocaml
+    --context-output=examples/output/ctx.sctx
+    --dash-to-underscore
+    --curry-types=disable))))
 (rule
  (alias codebase)
  (deps

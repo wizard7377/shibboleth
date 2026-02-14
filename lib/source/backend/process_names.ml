@@ -10,7 +10,9 @@
 
 include Ast
 let keywords = ["and";"as";"assert";"asr";"begin";"class";"constraint";"do";"done";"downto";"else";"end";"exception";"external";"false";"for";"fun";"function";"functor";"if";"in";"include";"inherit";"initializer";"land";"lazy";"let";"lor";"lsl";"lsr";"lxor";"match";"method";"mod";"module";"mutable";"new";"nonrec";"object";"of";"open";"or";"private";"rec";"sig";"struct";"then";"to";"true";"try";"type";"val";"virtual";"when";"while";"with"]
-let is_keyword (s : string) : bool = List.mem s keywords
+module KeywordSet = Set.Make(String)
+let keyword_set = KeywordSet.of_list keywords
+let is_keyword (s : string) : bool = KeywordSet.mem s keyword_set
 type context = ..
 type context += PatternHead
 type context += PatternTail
@@ -58,8 +60,9 @@ let get_scope_level (input:string) (name:string option) (scope:string StringMap.
   | None -> StringMap.find_opt input scope
 
 let last (lst:'a list) : 'a =
-  assert (List.length lst > 0);
-  List.nth lst (List.length lst - 1)
+  match List.rev lst with
+  | x :: _ -> x
+  | [] -> failwith "last: empty list"
 
 let rec map_last (f : 'a -> 'a) (lst : 'a list) : 'a list =
   match lst with

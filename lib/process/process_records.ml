@@ -248,6 +248,12 @@ and expand_structure_item (state : state) (si : Parsetree.structure_item) :
     | Pstr_exception ec ->
         let ec' = expand_type_exception state ec in
         { si with pstr_desc = Pstr_exception ec' }
+    | Pstr_modtype mtd ->
+        let mtd' = expand_module_type_declaration state mtd in
+        { si with pstr_desc = Pstr_modtype mtd' }
+    | Pstr_include incl ->
+        let incl' = { incl with pincl_mod = expand_module_expr state incl.pincl_mod } in
+        { si with pstr_desc = Pstr_include incl' }
     | _ -> si
   in
   state.pending_types @ [ si' ]
@@ -263,11 +269,13 @@ and expand_module_expr (state : state) (me : Parsetree.module_expr) :
       let str' = expand_structure state str in
       { me with pmod_desc = Pmod_structure str' }
   | Pmod_functor (fp, body) ->
+      let fp' = expand_functor_parameter state fp in
       let body' = expand_module_expr state body in
-      { me with pmod_desc = Pmod_functor (fp, body') }
+      { me with pmod_desc = Pmod_functor (fp', body') }
   | Pmod_constraint (me', mt) ->
       let me'' = expand_module_expr state me' in
-      { me with pmod_desc = Pmod_constraint (me'', mt) }
+      let mt' = expand_module_type state mt in
+      { me with pmod_desc = Pmod_constraint (me'', mt') }
   | _ -> me
 
 and expand_type_exception (state : state) (te : Parsetree.type_exception) :
@@ -287,6 +295,111 @@ and expand_type_exception (state : state) (te : Parsetree.type_exception) :
 and expand_structure (state : state) (str : Parsetree.structure) :
     Parsetree.structure =
   List.concat_map (expand_structure_item state) str
+
+(** Convert a generated [Pstr_type] structure item to a [Psig_type]
+    signature item for use in signature contexts. *)
+and str_type_to_sig_type (si : Parsetree.structure_item) :
+    Parsetree.signature_item =
+  match si.pstr_desc with
+  | Pstr_type (rf, tds) ->
+      Builder.psig_type rf tds
+  | _ -> failwith "process_records: expected Pstr_type in pending_types"
+
+(** Expand [\[%record_type ...\]] in a module type. *)
+and expand_module_type (state : state) (mt : Parsetree.module_type) :
+    Parsetree.module_type =
+  match mt.pmty_desc with
+  | Pmty_signature sg ->
+      let sg' = expand_signature state sg in
+      { mt with pmty_desc = Pmty_signature sg' }
+  | Pmty_functor (fp, body) ->
+      let fp' = expand_functor_parameter state fp in
+      let body' = expand_module_type state body in
+      { mt with pmty_desc = Pmty_functor (fp', body') }
+  | Pmty_with (mt', cstrs) ->
+      let mt'' = expand_module_type state mt' in
+      let cstrs' = List.map (expand_with_constraint state) cstrs in
+      { mt with pmty_desc = Pmty_with (mt'', cstrs') }
+  | _ -> mt
+
+(** Expand [\[%record_type ...\]] in a functor parameter. *)
+and expand_functor_parameter (state : state)
+    (fp : Parsetree.functor_parameter) : Parsetree.functor_parameter =
+  match fp with
+  | Unit -> Unit
+  | Named (name, mt) ->
+      let mt' = expand_module_type state mt in
+      Named (name, mt')
+
+(** Expand [\[%record_type ...\]] in a [with] constraint. *)
+and expand_with_constraint (state : state)
+    (wc : Parsetree.with_constraint) : Parsetree.with_constraint =
+  match wc with
+  | Pwith_type (lid, td) ->
+      Pwith_type (lid, expand_type_declaration state td)
+  | Pwith_typesubst (lid, td) ->
+      Pwith_typesubst (lid, expand_type_declaration state td)
+  | _ -> wc
+
+(** Expand record types in a signature item, returning the item
+    plus any generated type declarations that should precede it. *)
+and expand_signature_item (state : state) (si : Parsetree.signature_item) :
+    Parsetree.signature_item list =
+  state.pending_types <- [];
+  let si' =
+    match si.psig_desc with
+    | Psig_value vd ->
+        let vd' = expand_value_description state vd in
+        { si with psig_desc = Psig_value vd' }
+    | Psig_type (rf, tds) ->
+        let tds' = List.map (expand_type_declaration state) tds in
+        { si with psig_desc = Psig_type (rf, tds') }
+    | Psig_typesubst tds ->
+        let tds' = List.map (expand_type_declaration state) tds in
+        { si with psig_desc = Psig_typesubst tds' }
+    | Psig_exception te ->
+        let te' = expand_type_exception state te in
+        { si with psig_desc = Psig_exception te' }
+    | Psig_module md ->
+        let md' = expand_module_declaration state md in
+        { si with psig_desc = Psig_module md' }
+    | Psig_recmodule mds ->
+        let mds' = List.map (expand_module_declaration state) mds in
+        { si with psig_desc = Psig_recmodule mds' }
+    | Psig_modtype mtd ->
+        let mtd' = expand_module_type_declaration state mtd in
+        { si with psig_desc = Psig_modtype mtd' }
+    | Psig_modtypesubst mtd ->
+        let mtd' = expand_module_type_declaration state mtd in
+        { si with psig_desc = Psig_modtypesubst mtd' }
+    | Psig_include incl ->
+        let incl' = { incl with pincl_mod = expand_module_type state incl.pincl_mod } in
+        { si with psig_desc = Psig_include incl' }
+    | _ -> si
+  in
+  let sig_types = List.map str_type_to_sig_type state.pending_types in
+  sig_types @ [ si' ]
+
+(** Expand record types in a value description. *)
+and expand_value_description (state : state)
+    (vd : Parsetree.value_description) : Parsetree.value_description =
+  { vd with pval_type = expand_core_type state vd.pval_type }
+
+(** Expand record types in a module declaration. *)
+and expand_module_declaration (state : state)
+    (md : Parsetree.module_declaration) : Parsetree.module_declaration =
+  { md with pmd_type = expand_module_type state md.pmd_type }
+
+(** Expand record types in a module type declaration. *)
+and expand_module_type_declaration (state : state)
+    (mtd : Parsetree.module_type_declaration) :
+    Parsetree.module_type_declaration =
+  { mtd with pmtd_type = Option.map (expand_module_type state) mtd.pmtd_type }
+
+(** Expand record types in a signature. *)
+and expand_signature (state : state) (sg : Parsetree.signature) :
+    Parsetree.signature =
+  List.concat_map (expand_signature_item state) sg
 
 (** Main entry point: expand all [\[%record_type ...\]] nodes in a list of
     toplevel phrases. *)

@@ -27,11 +27,17 @@ let merge (t1 : t) (t2 : t) : t =
     merged
   end
 
+module PathSet = Set.Make(struct
+  type t = string list
+  let compare = compare
+end)
+
 let find ~(ctx : t) ~(opened : path list) ~(root : string) : name_info list =
+  let opened_set = PathSet.of_list opened in
   let results = ref [] in
   Hashtbl.iter
     (fun n info ->
-      if List.mem n.path opened && n.root = root then
+      if n.root = root && PathSet.mem n.path opened_set then
         results := info :: !results)
     ctx;
   !results
