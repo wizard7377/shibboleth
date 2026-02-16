@@ -25,8 +25,8 @@ Shibboleth performs **syntactic conversion** — it translates SML source code i
 ## Installation
 
 ```bash
-git clone https://github.com/wizard7377/sml-ocaml-converter.git
-cd sml-ocaml-converter
+git clone https://github.com/wizard7377/shibboleth.git
+cd shibboleth
 opam install . --deps-only
 make install
 ```

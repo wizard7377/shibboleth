@@ -7,7 +7,7 @@
 (generate_opam_files true)
 
 (source
- (github wizard7377/sml-ocaml-converter))
+ (github wizard7377/shibboleth))
 
 (authors "Asher Frost <wizardishlike@gmail.com>")
 
