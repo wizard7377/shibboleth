@@ -70,12 +70,12 @@ let context_to_string (ctx : name_context) : string =
 (** Overall context for processing, including configuration options *)
 type context = {
   name_ctx : name_context;
-  config : Common.options;
+  config : Common.t;
 }
 let update context f = { context with name_ctx = f context.name_ctx }
 let default_context : context = {
   name_ctx = EmptyContext;
-  config = Common.mkOptions ();
+  config = Common.create [];
 }
 
 (** Track identifiers that need cascading renames *)
@@ -84,10 +84,10 @@ module Builder = Ast_builder.Make(struct
   let loc = Location.none
 end)
 module Log = Common.Make (struct
-  let config = Common.mkOptions ()
+  let config = Common.create []
   let group = "process_names"
 end)
-class process_ocaml ~(opts : Common.options) =
+class process_ocaml ~(opts : Common.t) =
   object (self)
     inherit [context] Ast_traverse.map_with_context as super
 
@@ -108,7 +108,7 @@ class process_ocaml ~(opts : Common.options) =
 
     (** Check if currying is enabled *)
     method private should_curry : bool =
-      Common.engaged (Common.get_curry_expressions config)
+      Common.engaged (Common.get (Convert_flag Curry_expressions) config)
 
     (** Extract patterns from a tuple pattern for currying.
         Handles nested parentheses and type constraints. *)
@@ -160,7 +160,7 @@ class process_ocaml ~(opts : Common.options) =
 
     (** Check if a name needs keyword escaping *)
     method private needs_keyword_escape (name : string) : bool =
-      Keyword.is_keyword name && Common.is_flag_enabled (Common.get_convert_keywords config)
+      Keyword.is_keyword name && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) config)
 
     (** Apply cascading rename: if name_ exists, become name__, otherwise become name_ *)
     method private escape_keyword (name : string) : string =
@@ -205,35 +205,19 @@ class process_ocaml ~(opts : Common.options) =
 
       match ctx with
       
-      | InPattern _ | InVariableContext (InPattern _) ->
-          (* In patterns, guess based on capitalization if --guess-var is set *)
-          (match Common.get_guess_var config with
-           | Some pattern ->
-               let regex = Re.Str.regexp ({|\b|} ^ pattern ^ {|\b|}) in
-               if Re.Str.string_match regex name_after_escape 0 then
-                 (* Matches guess pattern - treat as variable *)
-                 if Common.is_flag_enabled (Common.get_convert_names config) then
-                   Capital.process_lowercase name_after_escape
-                 else
-                   name_after_escape
-               else
-                 (* Doesn't match - treat as constructor *)
-                 Capital.process_uppercase name_after_escape
-           | None ->
-               (* No guess pattern - use SML capitalization as-is *)
-               name_after_escape)
+      
 
-      | InTypeDecl | InQualifiedName InTypeDecl | InVariableContext _ when Common.is_flag_enabled (Common.get_rename_types config) ->
+      | InTypeDecl | InQualifiedName InTypeDecl | InVariableContext _ when Common.is_flag_enabled (Common.get (Convert_flag Rename_types) config) ->
           (* Type declarations must be lowercase *)
           let lowered = Capital.process_lowercase name_after_escape in
           if Capital.is_variable_identifier lowered then lowered
           else lowered ^ "_"
       
-      | InTypeName | InQualifiedName InTypeName when Common.is_flag_enabled (Common.get_rename_types config) ->
+      | InTypeName | InQualifiedName InTypeName when Common.is_flag_enabled (Common.get (Convert_flag Rename_types) config) ->
           let lowered = Capital.process_lowercase name_after_escape in
           if Capital.is_variable_identifier lowered then lowered
           else lowered ^ "_"
-      | InConstructorDecl when Common.is_flag_enabled (Common.get_convert_names config) ->
+      | InConstructorDecl when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) config) ->
           Log.log_with ~cfg:config ~level:Debug ~kind:Neutral
             ~msg:("Processing constructor declaration name: " ^ name_after_escape) ();
           (* Map SML basis constructors to OCaml equivalents *)
@@ -253,11 +237,11 @@ class process_ocaml ~(opts : Common.options) =
           (* Constructors must be uppercase *)
           Capital.process_uppercase mapped
 
-      | InPatternHead when Common.is_flag_enabled (Common.get_guess_pattern config) ->
+      | InPatternHead ->
           (* Pattern heads are always constructors *)
           Capital.process_uppercase name_after_escape
 
-      | InValue | InLabel when Common.is_flag_enabled (Common.get_convert_names config) ->
+      | InValue | InLabel when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) config) ->
           (* Values and labels should be lowercase *)
           Capital.process_lowercase name_after_escape
 
@@ -353,18 +337,29 @@ class process_ocaml ~(opts : Common.options) =
 
     (** Override expression traversal *)
     method! expression ctx expr =
-      (* First check if this expression needs currying transformation *)
+      (* Check if expression has [@shibboleth.no_curry] attribute *)
+      let has_no_curry_attr =
+        List.exists (fun (attr : Parsetree.attribute) ->
+          attr.attr_name.txt = "shibboleth.no_curry"
+        ) expr.pexp_attributes
+      in
+      (* First check if this expression needs currying transformation.
+         NOTE: We only curry function DEFINITIONS, not function APPLICATIONS.
+         If someone wrote foo (1, 2), they should get foo (1, 2) in OCaml,
+         not foo 1 2. This is important for:
+         - Functions that genuinely take a tuple argument
+         - Constructors (handled separately via Pexp_construct)
+         - Semantic preservation *)
       let should_transform_curry =
-        if self#should_curry then
+        if has_no_curry_attr then
+          false
+        else if self#should_curry then
           match expr.pexp_desc with
           | Pexp_fun (_, _, pat, _) ->
               (match self#extract_tuple_patterns pat with
                | Some _ -> true
                | None -> false)
-          | Pexp_apply (_, [(Nolabel, arg)]) ->
-              (match self#is_uncurryable_tuple arg with
-               | Some _ -> true
-               | None -> false)
+          (* Removed: Pexp_apply currying - we preserve tuple arguments as-is *)
           | Pexp_function cases ->
               (match cases with
                | [{ pc_lhs; pc_guard = None; pc_rhs = _ }] ->
@@ -385,11 +380,7 @@ class process_ocaml ~(opts : Common.options) =
               (match self#extract_tuple_patterns pat with
                | Some pats -> self#build_curried_function pats body
                | None -> expr)
-          | Pexp_apply (f, [(Nolabel, arg)]) ->
-              (match self#is_uncurryable_tuple arg with
-               | Some tuple_args ->
-                   { expr with pexp_desc = Pexp_apply (f, List.map (fun a -> (Nolabel, a)) tuple_args) }
-               | None -> expr)
+          (* Removed: Pexp_apply currying *)
           | Pexp_function cases ->
               (match cases with
                | [{ pc_lhs; pc_guard = None; pc_rhs }] ->
@@ -402,6 +393,14 @@ class process_ocaml ~(opts : Common.options) =
           expr
       in
 
+      (* Strip [@shibboleth.no_curry] attribute from output *)
+      let strip_no_curry expr =
+        let new_attrs = List.filter (fun (attr : Parsetree.attribute) ->
+          attr.attr_name.txt <> "shibboleth.no_curry"
+        ) expr.pexp_attributes in
+        { expr with pexp_attributes = new_attrs }
+      in
+
       (* If we transformed, re-process the new structure; otherwise use super *)
       let expr_after_curry =
         if should_transform_curry then
@@ -409,6 +408,9 @@ class process_ocaml ~(opts : Common.options) =
         else
           super#expression ctx expr
       in
+
+      (* Strip the no_curry attribute and apply name processing *)
+      let expr_after_curry = strip_no_curry expr_after_curry in
 
       (* Then apply name processing transformations to the result *)
       match expr_after_curry.pexp_desc with
@@ -424,16 +426,14 @@ class process_ocaml ~(opts : Common.options) =
           { expr_after_curry with pexp_desc = Pexp_ident new_lid }
 
       | Pexp_construct (lid, arg_opt) ->
-          (* Constructor expression *)
+          (* Constructor expression - argument already processed by super#expression above *)
           let new_lid = self#process_loc_longident InConstructorDecl lid in
-          let new_arg = Option.map (super#expression ctx) arg_opt in
-          { expr_after_curry with pexp_desc = Pexp_construct (new_lid, new_arg) }
+          { expr_after_curry with pexp_desc = Pexp_construct (new_lid, arg_opt) }
 
       | Pexp_field (e, lid) ->
-          (* Record field access *)
-          let new_e = super#expression ctx e in
+          (* Record field access - expression already processed by super#expression above *)
           let new_lid = self#process_loc_longident InLabel lid in
-          { expr_after_curry with pexp_desc = Pexp_field (new_e, new_lid) }
+          { expr_after_curry with pexp_desc = Pexp_field (e, new_lid) }
 
       | _ ->
           expr_after_curry
@@ -448,9 +448,9 @@ class process_ocaml ~(opts : Common.options) =
     method! constructor_declaration ctx cd =
       Log.log_with ~cfg:config ~level:Debug ~kind:Neutral
         ~msg:("Processing constructor declaration: " ^ cd.pcd_name.txt) ();
-      let new_name = self#process_identifier InConstructorDecl cd.pcd_name.txt in
-      let new_cd = super#constructor_declaration ctx cd in
-      { new_cd with pcd_name = { cd.pcd_name with txt = new_name } }
+      (* Backend has already applied constructor transformations via registry,
+         so preserve the name as-is instead of re-processing *)
+      super#constructor_declaration ctx cd
 
     (** Override label declaration (record fields) *)
     method! label_declaration ctx ld =

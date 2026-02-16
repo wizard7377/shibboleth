@@ -10,16 +10,17 @@ include Helpers
 (** Module type for type processing dependencies *)
 module type TYPE_DEPS = sig
   val labeller : Process_label.process_label
-  val build_longident : string list -> Ppxlib.Longident.t
+  val build_longident : ?capitalize_modules:bool -> string list -> Ppxlib.Longident.t
   val name_to_string : string list -> string
   val ghost : 'a -> 'a Location.loc
-  val config : Common.options
+  val config : Common.t
 end
 
 (** Module type for type processing interface *)
 module type TYPE_PROCESSOR = sig
   val process_type_value : Ast.typ Ast.node -> Parsetree.core_type
   val process_object_field_type : Ast.typ_row Ast.node -> Parsetree.object_field list
+  val process_label_declaration : Ast.typ_row Ast.node -> Parsetree.label_declaration list
   val process_type : Ast.typ Ast.node -> Parsetree.core_type
 end
 
@@ -30,39 +31,53 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
   
   (** Convert an SML type to an OCaml core type. *)
   let rec process_type_value (ty : Ast.typ Ast.node) : Parsetree.core_type =
-    (labeller#cite Helpers.Attr.core_type ty.pos)
+    (labeller#cite Helpers.Attr.core_type ty.comments)
       (match ty.value with
       | TypVar name -> (
           match name.value with
-          | Ast.IdxVar v -> Type_var_utils.process_type_var_name v.value
+          | Ast.IdxVar v -> Backend_utils.process_type_var_name v.value
           | _ -> failwith "Expected type variable")
       | TypCon (args, head) ->
           let head_longident =
-            build_longident (Idx_utils.idx_to_name head.value)
+            build_longident (Backend_utils.idx_to_name head.value)
           in
+          
           let args' = List.map (fun arg -> process_type_value arg) args in
           Builder.ptyp_constr (ghost head_longident) args'
       | TypPar ty' ->
-          labeller#cite Helpers.Attr.core_type ty.pos (process_type_value ty')
+          labeller#cite Helpers.Attr.core_type ty.comments (process_type_value ty')
       | TypFun (ty1, ty2) -> make_arrow ty1 ty2
       | TypTuple tys ->
           Builder.ptyp_tuple (List.map (fun t -> process_type_value t) tys)
+      | TypRecord [] ->
+          Builder.ptyp_constr (ghost (Ppxlib.Longident.Lident "unit")) []
       | TypRecord fields ->
-          let fields' =
+          (* Emit a [%record_type ...] extension node.
+             The payload encodes the record fields as label declarations
+             inside a Pstr_type, to be expanded by process_records. *)
+          let labels =
             List.flatten
-              (List.map (fun f -> process_object_field_type f) fields)
+              (List.map (fun f -> process_label_declaration f) fields)
           in
-          Builder.ptyp_object fields' Closed)
+          let td =
+            Builder.type_declaration ~name:(ghost "__record") ~params:[] ~cstrs:[]
+              ~kind:(Parsetree.Ptype_record labels)
+              ~private_:Asttypes.Public ~manifest:None
+          in
+          let str_item = Builder.pstr_type Recursive [td] in
+          let payload = Parsetree.PStr [str_item] in
+          Builder.ptyp_extension ({ txt = "record_type"; loc = Helpers.empty_loc }, payload))
 
   (** Convert SML record type rows to OCaml object fields. *)
   and process_object_field_type (field : Ast.typ_row Ast.node) :
       Parsetree.object_field list =
-    List.map (labeller#cite Helpers.Attr.object_field field.pos)
+    List.map (labeller#cite Helpers.Attr.object_field field.comments)
     @@
     match field.value with
     | Ast.TypRow (name, ty, rest) -> (
         let label_name =
-          name_to_string (Idx_utils.idx_to_name name.value)
+          Backend_utils.process_lowercase
+            (name_to_string (Backend_utils.idx_to_name name.value))
         in
         let here : Parsetree.object_field =
           Builder.otag (ghost label_name) (process_type_value ty)
@@ -70,8 +85,26 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
         match rest with
         | Some rest' -> here :: process_object_field_type rest'
         | None -> [ here ])
+
+  (** Convert SML record type rows to OCaml label declarations (for record types). *)
+  and process_label_declaration (field : Ast.typ_row Ast.node) :
+      Parsetree.label_declaration list =
+    match field.value with
+    | Ast.TypRow (name, ty, rest) ->
+        let label_name =
+          Backend_utils.process_lowercase
+            (name_to_string (Backend_utils.idx_to_name name.value))
+        in
+        let here : Parsetree.label_declaration =
+          Ast_helper.Type.field ~loc:Helpers.empty_loc
+            (ghost label_name) (process_type_value ty)
+        in
+        let here = labeller#cite Helpers.Attr.label_declaration field.comments here in
+        (match rest with
+        | Some rest' -> here :: process_label_declaration rest'
+        | None -> [ here ])
   and make_arrow (ty1 : Ast.typ Ast.node) (ty2 : Ast.typ Ast.node) = 
-    if not @@ Common.engaged @@ Common.get_curry_types config then 
+    if not @@ Common.engaged @@ Common.get (Convert_flag Curry_types) config then
       Builder.ptyp_arrow Nolabel (process_type_value ty1) (process_type_value ty2)
     else
     begin match ty1.value with

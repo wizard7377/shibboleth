@@ -1,0 +1,17 @@
+(data_only_dirs examples)
+
+(rule
+(alias usetest)
+(deps (source_tree examples/input))
+(action (progn
+(system "rm -rf examples/output/%{env:DIR=basis}")
+(system "mkdir -p examples/output/%{env:DIR=basis}")
+(run %{bin:shibboleth} group
+    --input examples/input/%{env:DIR=basis}
+    --force
+    --output examples/output/%{env:DIR=basis}
+    --check-ocaml
+    --context-output=examples/output/ctx.sctx
+    --dash-to-underscore
+    --curry-types=disable)))
+)

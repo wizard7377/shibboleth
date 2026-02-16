@@ -77,3 +77,4 @@
 include Ast_node
 include Ast_cm
 include Ast_core
+include Ast_gram

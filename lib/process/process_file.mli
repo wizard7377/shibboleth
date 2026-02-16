@@ -79,15 +79,15 @@ type ocaml_code
     @param config
       Conversion configuration including input/output paths and transformation
       flags *)
-class process_file : ?store:Context.t -> options -> object
-  method set_config : options -> unit
+class process_file : ?store:Context.t -> Common.t -> object
+  method set_config : Common.t -> unit
   (** [set_config cfg] updates the processor's configuration.
 
       This allows reusing a processor instance with different settings.
 
       @param cfg New configuration to apply *)
 
-  method get_config : unit -> options
+  method get_config : unit -> Common.t
   (** [get_config ()] retrieves the current configuration.
 
       @return The active configuration settings *)
@@ -126,7 +126,7 @@ class process_file : ?store:Context.t -> options -> object
       @return Parsed SML code representation
       @raise Parsing.Parse_error if the source is syntactically invalid *)
 
-  method convert_to_ocaml : sml_code -> ocaml_code
+  method convert_to_ocaml : ?header:string list -> sml_code -> ocaml_code
   (** [convert_to_ocaml sml] transforms SML AST to OCaml Parsetree.
 
       This phase:
@@ -153,6 +153,10 @@ class process_file : ?store:Context.t -> options -> object
       @param ocaml OCaml code from {!convert_to_ocaml}
       @return Formatted OCaml source text ready to write to a file *)
 
-  method process_file : string -> string
+  method get_constructors : Context.Constructor_registry.constructor_info list
+  (** [get_constructors] returns the constructors discovered during the last
+      {!convert_to_ocaml} call. Empty before any conversion has been run. *)
+
+  method process_file : ?header:string list -> string -> string
   (** [process_file path] performs the complete conversion pipeline. *)
 end

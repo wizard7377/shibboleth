@@ -58,8 +58,8 @@
 
   (* Track comment nesting depth *)
   let comment_depth = ref 0
-  let file_comments : string list ref = ref []
   let comment_buf = Buffer.create 2048
+  let comment_start_pos = ref 0
 }
 
 (* Character classes *)
@@ -92,7 +92,9 @@ rule token = parse
 
   (* Comments *)
   | "(*"         { comment_depth := 1;
+                   comment_start_pos := Lexing.lexeme_start lexbuf;
                    Buffer.clear comment_buf;
+                   Buffer.add_string comment_buf "(*";
                    comment lexbuf }
 
   (* String literals *)
@@ -104,12 +106,12 @@ rule token = parse
                    char_lit lexbuf }
 
   (* Hexadecimal integers with optional negation: ~0xhex or 0xhex *)
-  | '~' "0x" hexnum as s { HEX_LIT s }
-  | "0x" hexnum as s     { HEX_LIT s }
+  | '~' "0x" hexnum as s { INT_LIT s }
+  | "0x" hexnum as s     { INT_LIT s }
 
   (* Word literals: 0w for decimal, 0wx for hex *)
   | "0wx" hexnum as s    { HEX_LIT s }
-  | "0w" num as s        { INT_LIT s }
+  | "0w" num as s        { HEX_LIT s }
 
   (* Floating point literals with optional negation *)
   | '~' num '.' num 'e' '~' num as s  { FLOAT_LIT s }
@@ -126,7 +128,6 @@ rule token = parse
   (* Decimal integers with optional negation: ~num or num *)
   | '~' num as s  { INT_LIT s }
   | num as s      { INT_LIT s }
-
   (* Punctuation and operators *)
   | '('           { LPAREN }
   | ')'           { RPAREN }
@@ -144,6 +145,11 @@ rule token = parse
   | "..."         { ELLIPSIS }
   | "=>"          { BIGARROW }
   | "->"          { ARROW }
+  (* FFI keywords - must appear before '_' to get longest match *)
+  | "_import"     { FFI_IMPORT }
+  | "_export"     { FFI_EXPORT }
+  | "_address"    { FFI_ADDRESS }
+  | "_symbol"     { FFI_SYMBOL }
   | '_'           { UNDERSCORE }
   | "#["        { HASH_OPEN }
   | '#'           { HASH }
@@ -180,7 +186,7 @@ rule token = parse
   | "op" symbolic_id as s { SYMBOL_IDENT (Symbol s) }
 
   (* End of file *)
-  | eof           { file_comments := [] ; EOF !file_comments }
+  | eof           { EOF [] }
 
   (* Error case *)
   | _ as c        { raise (Lexer_error (Printf.sprintf "Unexpected character: '%c'" c)) }
@@ -193,7 +199,9 @@ and comment = parse
   | "*)"          { decr comment_depth;
                     Buffer.add_string comment_buf "*)";
                     if !comment_depth = 0 then (
-                      file_comments := (Buffer.contents comment_buf) :: !file_comments;
+                      let comment_text = Buffer.contents comment_buf in
+                      let end_pos = Lexing.lexeme_end lexbuf in
+                      Utils.add_comment comment_text !comment_start_pos end_pos;
                       comment_buf |> Buffer.clear;
                       token lexbuf
                     ) else

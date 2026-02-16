@@ -26,16 +26,22 @@ module Debug = Ppxlib.Pprintast
 module ContextLib = Context  (* Library Context module before shadowing *)
 
 (* Re-export helper modules for use within the functor *)
-module Idx_utils = Idx_utils
-module Type_var_utils = Type_var_utils
-module Capital_utils = Capital_utils
+module Backend_utils = Backend_utils
+module Precedence_resolver = Precedence_resolver
 
-module Make (Context : CONTEXT) (Config : CONFIG) = struct
+module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
+  (* Alias to avoid shadowing the Context library module *)
+  module ContextLib = Context
   let config = Config.config
   let quoter = Ppxlib.Expansion_helpers.Quoter.create ()
-  let labeller = new Process_label.process_label config Context.lexbuf
-  let lexbuf = Context.lexbuf
-  let current_temp : int ref = ref 0 
+  let labeller = new Process_label.process_label config Ctx.lexbuf
+  let lexbuf = Ctx.lexbuf
+  let current_temp : int ref = ref 0
+
+  (** Extract start position from an AST node, if available *)
+  let node_start_pos (n : 'a Ast.node) : Lexing.position option =
+    match n.pos with Some (sp, _) -> Some sp | None -> None
+
   let get_current_then (i : int) : int =
     let res = !current_temp in
     current_temp := !current_temp + i;
@@ -60,6 +66,12 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
 
   (* Name processing removed - using literal translation only *)
 
+  let escape_keyword (s : string) : string =
+    if Ppxlib.Keyword.is_keyword s
+       && is_flag_enabled (Common.get (Convert_flag Convert_keywords) config)
+    then s ^ "_"
+    else s
+
   let sanitize_ident (s : string) : string =
     let buf = Buffer.create (String.length s) in
     String.iter
@@ -69,11 +81,48 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         | '`' -> Buffer.add_string buf "_bq"
         | _ -> Buffer.add_char buf c)
       s;
-    Buffer.contents buf
+    let result = Buffer.contents buf in
+    (* OCaml lexer always tokenizes :: as the cons constructor, so operators
+       starting with :: followed by more characters (like ::=) are invalid.
+       Prefix with @ to produce a valid OCaml operator (e.g. @::=). *)
+    let result =
+      if String.length result > 2 && String.sub result 0 2 = "::"
+      then "@" ^ result
+      else result
+    in
+    (* Convert SML symbolic names that aren't valid OCaml operators,
+       but preserve known OCaml constructors/operators *)
+    let result =
+      if Backend_utils.is_operator_name result
+         && not (Backend_utils.is_valid_ocaml_operator result)
+         && result <> "[]" && result <> "::" && result <> "()"
+      then Backend_utils.operator_to_ident result
+      else result
+    in
+    escape_keyword result
+
+  (** Capitalize all but the last element in a list (for module path capitalization).
+      ["test"; "foo"; "ok"] becomes ["Test_"; "Foo_"; "ok"] 
+      Module names in OCaml must start uppercase; we append _ if name was lowercase. *)
+  let capitalize_module_path (parts : string list) : string list =
+    let rec aux = function
+      | [] -> []
+      | [last] -> [last]  (* Leave the final element unchanged *)
+      | first :: rest ->
+          let cap_first = 
+            if Backend_utils.is_variable_identifier first then
+              String.capitalize_ascii first ^ "_"
+            else
+              first
+          in
+          cap_first :: aux rest
+    in
+    aux parts
 
   (** Build a Longident from name parts (sanitized to valid OCaml identifiers) *)
-  let build_longident (parts : string list) : Ppxlib.Longident.t =
-    match parts |> List.map sanitize_ident with
+  let build_longident ?(capitalize_modules=false) (parts : string list) : Ppxlib.Longident.t =
+    let parts' = if capitalize_modules then capitalize_module_path parts else parts in
+    match parts' |> List.map sanitize_ident with
     | [] -> failwith "empty name"
     | [ x ] -> Longident.Lident x
     | first :: rest ->
@@ -93,6 +142,23 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
 
   let current_path : string list ref = ref []
 
+  let push_module name =
+    current_path := !current_path @ [name]
+
+  let pop_module () =
+    match List.rev !current_path with
+    | _ :: rest -> current_path := List.rev rest
+    | [] -> ()
+
+  let register_constructor name =
+    let ocaml_name = Backend_utils.transform_constructor name in
+    let full_path = !current_path @ [name] in
+    Context.Constructor_registry.add_constructor
+      Ctx.context.constructor_registry
+      ~path:full_path
+      ~name
+      ~ocaml_name
+
   exception BadAst of (Lexing.position * Lexing.position) option * string
 
   let mkBadAst ?loc (msg : string) : exn = BadAst (loc, msg)
@@ -107,8 +173,8 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
   let depth : int ref = ref 0
 
   let trace_part ?(level = 2) ?(ast = "") ?(msg = "") ~value : 'a =
-    match get_verbosity config with
-    | Some v when v >= level ->
+    let verbosity = Common.get (Shell_flag Verbosity) config in
+    if verbosity >= level then begin
         (* TODO use level *)
         let indent = !depth in
         depth := indent + 1;
@@ -121,16 +187,17 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
           ~msg:(Stdlib.Format.sprintf "%dExiting %s %s" !depth ast msg)
           ();
         res
-    | _ -> value ()
+    end
+    else value ()
 
   (* Use helper modules for common operations *)
-  let is_variable_identifier = Capital_utils.is_variable_identifier
-  let idx_to_string = Idx_utils.idx_to_string
-  let process_lowercase = Capital_utils.process_lowercase
-  let process_uppercase = Capital_utils.process_uppercase
+  let is_variable_identifier = Backend_utils.is_variable_identifier
+  let idx_to_string = Backend_utils.idx_to_string
+  let process_lowercase = Backend_utils.process_lowercase
+  let process_uppercase = Backend_utils.process_uppercase
   
   let idx_to_name (idx : Ast.idx) : string list =
-    Idx_utils.idx_to_name idx
+    Backend_utils.idx_to_name idx
 
   (** Main entry point for converting a complete SML program.
 
@@ -168,6 +235,9 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
   (** Convert SML record type rows to OCaml object fields. Delegated to Backend_types. *)
   let process_object_field_type = Types.process_object_field_type
 
+  (** Convert SML record type rows to OCaml label declarations. Delegated to Backend_types. *)
+  let process_label_declaration = Types.process_label_declaration
+
   (** Wrapper function for {!process_type_value}.
 
       @param ty The SML type to convert
@@ -192,7 +262,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
   (** Convert an SML constant to an OCaml constant. Delegated to Backend_constants. *)
   (* TODO Task 1.4: Wire Backend_const here *)
   (* Original process_con function to be replaced *)
-  let process_con = Backend_constants.process_con
+  let process_con = Backend_utils.process_con
 
   let rec is_operator (s : expression Ast.node) : bool =
     match s.value with
@@ -202,7 +272,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
     | ParenExp e -> is_operator e
     | _ -> false
 
-  and is_operator_name = Capital_utils.is_operator_name
+  and is_operator_name = Backend_utils.is_operator_name
 
   (** {2 Expression Processing}
 
@@ -232,9 +302,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
       process_exp (ExpApp (ExpIdx "f", ExpIdx "x"))
       (* → OCaml Parsetree for: f x *)
 
-      (* SML: x + y *)
-      process_exp (InfixApp (ExpIdx "x", "+", ExpIdx "y"))
-      (* → OCaml Parsetree for: (+) x y *)
+      (* Note: InfixApp removed - see precedence_resolver.ml for operator handling *)
     ]} *)
 
   let rec process_exp (expression : Ast.expression Ast.node) :
@@ -245,7 +313,6 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
          | ExpCon _ -> "ExpCon"
          | ExpApp _ -> "ExpApp"
          | ExpIdx _ -> "ExpIdx"
-         | InfixApp _ -> "InfixApp"
          | ParenExp _ -> "ParenExp"
          | TupleExp _ -> "TupleExp"
          | RecordExp _ -> "RecordExp"
@@ -264,61 +331,159 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
          | CaseExp _ -> "CaseExp"
          | FnExp _ -> "FnExp"))
       ();
+
+    (* Helper to process resolved expressions from precedence resolver *)
+    let rec process_resolved_exp (resolved : Precedence_resolver.resolved_exp) : Parsetree.expression =
+      match resolved with
+      | ResolvedSingle e ->
+          process_exp { value = e; pos = None; comments = [] }
+
+      | ResolvedApp (f, args) ->
+          (* Check if f is a constructor - if so, wrap args in tuple *)
+          let is_ctor_app = match f with
+            | ResolvedSingle (ExpIdx idx) ->
+                let name = idx_to_name idx.value in
+                let simple_name = name_to_string name in
+                let qual_path =
+                  if List.length name > 1 then
+                    Some (List.rev (List.tl (List.rev name)))
+                  else None
+                in
+                (match Context.Constructor_registry.lookup
+                  Ctx.context.constructor_registry ~path:qual_path simple_name with
+                | Some ctor -> Some (Some ctor)
+                | None ->
+                    (* Fallback heuristic for uppercase names not in registry:
+                       - If qualified (M.Foo) and uppercase, treat as constructor
+                       - If unqualified (Foo) with multiple args and uppercase, treat as constructor
+                         (regular functions are curried; constructors take tuple args) *)
+                    let is_uppercase = String.length simple_name > 0 &&
+                        Char.uppercase_ascii simple_name.[0] = simple_name.[0] &&
+                        simple_name.[0] <> '_' in
+                    if is_uppercase && (qual_path <> None || List.length args > 1) then
+                      Some None  (* Treat as constructor but no registry entry *)
+                    else
+                      None)
+            | _ -> None
+          in
+          (match is_ctor_app with
+          | Some ctor_opt ->
+              (* Constructor application - wrap args in tuple *)
+              let name = match f with
+                | ResolvedSingle (ExpIdx idx) -> idx_to_name idx.value
+                | _ -> failwith "impossible: already matched ExpIdx"
+              in
+              let qual_path =
+                if List.length name > 1 then
+                  Some (List.rev (List.tl (List.rev name)))
+                else None
+              in
+              let transformed_parts = match ctor_opt with
+                | Some ctor ->
+                    (match qual_path with
+                     | Some path -> path @ [ctor.Context.Constructor_registry.ocaml_name]
+                     | None -> [ctor.ocaml_name])
+                | None ->
+                    (* Use the name as-is (already uppercase) *)
+                    name
+              in
+              let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+              let arg_exps = List.map (fun arg -> process_exp arg) args in
+              (* In OCaml, constructor args must be parenthesized in a tuple *)
+              let arg_exp = match arg_exps with
+                | [] -> None
+                | [single] -> Some (Builder.pexp_tuple [single])
+                | _ -> Some (Builder.pexp_tuple arg_exps)
+              in
+              Builder.pexp_construct (ghost name_longident) arg_exp
+          | None ->
+              (* Regular function application - left-associative *)
+              let f_exp = process_resolved_exp f in
+              let arg_exps = List.map process_exp args in
+              List.fold_left (fun acc arg ->
+                Builder.pexp_apply acc [(Nolabel, arg)]
+              ) f_exp arg_exps)
+
+      | ResolvedInfix (left, op, right) ->
+          (* Binary operator - check constructor registry *)
+          let op_name = idx_to_string op.value in
+          let left_exp = process_resolved_exp left in
+          let right_exp = process_resolved_exp right in
+
+          let lookup_result = Context.Constructor_registry.lookup
+            Ctx.context.constructor_registry ~path:None op_name in
+          (match lookup_result with
+          | Some ctor ->
+              (* Constructor like :: *)
+              let name_longident = build_longident [ctor.Context.Constructor_registry.ocaml_name] in
+              let tuple = Builder.pexp_tuple [left_exp; right_exp] in
+              Builder.pexp_construct (ghost name_longident) (Some tuple)
+          | None ->
+              (* Regular operator like + *)
+              let op_longident = build_longident (idx_to_name op.value) in
+              Builder.pexp_apply
+                (Builder.pexp_ident (ghost op_longident))
+                [(Nolabel, left_exp); (Nolabel, right_exp)])
+    in
+
     let res = begin match expression.value with
     | ExpCon c -> Builder.pexp_constant (process_con c)
-    | ExpApp (e1, e2) when is_operator e2 ->
-        let op_name =
-          match e2.value with
-          | ExpIdx idx -> idx_to_name idx.value
-          | ParenExp e -> (
-              match e.value with
-              | ExpIdx idx -> idx_to_name idx.value
-              | _ -> failwith "Expected operator identifier")
-          | _ -> failwith "Expected operator identifier"
-        in
-        let op_longident = build_longident op_name in
-        Builder.pexp_apply
-          (Builder.pexp_ident (ghost op_longident))
-          [ (Nolabel, process_exp e1) ]
-    | ExpApp (e1, e2) -> (
-        (* Check if this is a constructor applied to a tuple *)
-        match (e1.value, e2.value) with
-        | (ExpIdx idx_node, TupleExp args) -> (
-            let idx_name = idx_to_name idx_node.value in
-            let idx_str = idx_to_string idx_node.value in
-            (* If it looks like a constructor (not lowercase variable), use pexp_construct *)
-            if not (is_variable_identifier idx_str) then
-              let name_longident = build_longident idx_name in
-              let arg_tuple = Builder.pexp_tuple (List.map process_exp args) in
-              Builder.pexp_construct (ghost name_longident) (Some arg_tuple)
-            else
-              (* Variable applied to tuple - use regular application *)
-              let e1' = process_exp e1 in
-              let e2' = Builder.pexp_tuple (List.map process_exp args) in
-              Builder.pexp_apply e1' [ (Nolabel, e2') ]
-          )
-        | _ ->
-            (* Regular application *)
-            let e1' = process_exp e1 in
-            let e2' = process_exp e2 in
-            Builder.pexp_apply e1' [ (Nolabel, e2') ]
-      )
+    | ExpApp exp_list ->
+        (* Resolve precedence to get structured expression *)
+        let resolved = Precedence_resolver.resolve_precedence exp_list in
+        process_resolved_exp resolved
     | ExpIdx idx ->
         let scoped_name = idx_to_name idx.value in
-        let name_longident = build_longident scoped_name in
-        Builder.pexp_ident (ghost name_longident)
-    | InfixApp (e1, op, e2) ->
-        let op_longident =
-          build_longident (idx_to_name op.value)
+        let simple_name = name_to_string scoped_name in
+        (* Extract module path if qualified *)
+        let qual_path =
+          if List.length scoped_name > 1 then
+            Some (List.rev (List.tl (List.rev scoped_name)))
+          else None
         in
-        Builder.pexp_apply
-          (Builder.pexp_ident (ghost op_longident))
-          [ (Nolabel, process_exp e1); (Nolabel, process_exp e2) ]
+        (* Try to look up as constructor *)
+        let lookup_result = Context.Constructor_registry.lookup
+          Ctx.context.constructor_registry ~path:qual_path simple_name in
+        (match lookup_result with
+        | Some ctor_info ->
+            (* Constructor reference - use transformed name *)
+            let transformed_parts = match qual_path with
+              | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+              | None -> [ctor_info.ocaml_name]
+            in
+            let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+            Builder.pexp_construct (ghost name_longident) None
+        | None ->
+            (* Value reference - apply same lowercase transform as pattern variables
+               to ensure consistent renaming (e.g. G -> g_ in both pat and exp) *)
+            let lowered_name = match List.rev scoped_name with
+              | last :: prefix -> List.rev (Backend_utils.transform_to_lowercase last :: prefix)
+              | [] -> scoped_name
+            in
+            let name_longident = build_longident lowered_name in
+            Builder.pexp_ident (ghost name_longident))
+    (* TODO: InfixApp removed - will be replaced by precedence-resolved ExpApp *)
+    (* | InfixApp (e1, op, e2) ->
+        let op_name = idx_to_string op.value in
+        let lookup_result = Context.Constructor_registry.lookup
+          Ctx.context.constructor_registry ~path:None op_name in
+        (match lookup_result with
+        | Some ctor_info ->
+            let name_longident = build_longident [ctor_info.Context.Constructor_registry.ocaml_name] in
+            let tuple = Builder.pexp_tuple [process_exp e1; process_exp e2] in
+            Builder.pexp_construct (ghost name_longident) (Some tuple)
+        | None ->
+            let op_longident = build_longident (idx_to_name op.value) in
+            Builder.pexp_apply
+              (Builder.pexp_ident (ghost op_longident))
+              [ (Nolabel, process_exp e1); (Nolabel, process_exp e2) ]) *)
     | ParenExp e -> process_exp e
     | TupleExp [] ->
         Builder.pexp_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | TupleExp exps ->
         Builder.pexp_tuple (List.map (fun e -> process_exp e) exps)
+    | RecordExp [] ->
+        Builder.pexp_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | RecordExp rows ->
         let fields =
           List.map
@@ -326,23 +491,61 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               match r.Ast.value with
               | Ast.Row (lab, expression, _) ->
                   let lab_longident =
-                    build_longident (idx_to_name lab.value)
+                    build_longident (List.map process_lowercase (idx_to_name lab.value))
                   in
                   (ghost lab_longident, process_exp expression))
             rows
         in
         Builder.pexp_record fields None
-    | RecordSelector lab ->
-        (* #label -> fun r -> r.label *)
-        let lab_str =
-          name_to_string (idx_to_name lab.value)
+    | RecordSelector lab -> (
+        (* Determine if this is a numeric selector (tuple) or label selector (record).
+           The parser may produce IdxIdx for both - we check if the content is numeric. *)
+        let is_numeric s = 
+          try ignore (int_of_string s); true 
+          with Failure _ -> false 
         in
-        let r_pat = Builder.ppat_var (ghost "r") in
-        let r_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "r")) in
-        let field_exp =
-          Builder.pexp_field r_exp (ghost (Ppxlib.Longident.Lident lab_str))
+        let make_tuple_selector n =
+          (* #n -> fun (_, ..., x, _, ...) -> x
+             where x is at position n (1-indexed) *)
+          let result_var = "r" in
+          (* Build a tuple pattern with wildcards and one binding at position n.
+             Generate a pattern with exactly n elements for #n where n >= 2,
+             or 2 elements for #1. *)
+          let size = max 2 n in
+          let pats = List.init size (fun i ->
+            if i = n - 1 then
+              Builder.ppat_var (ghost result_var)
+            else
+              Builder.ppat_any
+          ) in
+          let tuple_pat = Builder.ppat_tuple pats in
+          let result_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident result_var)) in
+          let fn_exp = Builder.pexp_fun Nolabel None tuple_pat result_exp in
+          (* Add [@shibboleth.no_curry] attribute to prevent curry transformation *)
+          let no_curry_attr = Ppxlib.Ast_helper.Attr.mk (ghost "shibboleth.no_curry") (Parsetree.PStr []) in
+          Helpers.Attr.expression fn_exp no_curry_attr
         in
-        Builder.pexp_fun Nolabel None r_pat field_exp
+        let make_record_selector lab_str =
+          (* #label -> fun r -> r#label (for records/objects) *)
+          let r_pat = Builder.ppat_var (ghost "r") in
+          let r_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "r")) in
+          let lab_str' = process_lowercase (sanitize_ident lab_str) in
+          let field_exp = Builder.pexp_send r_exp (ghost @@ lab_str') in
+          Builder.pexp_fun Nolabel None r_pat field_exp
+        in
+        match lab.value with
+        | IdxNum num_str ->
+            make_tuple_selector (int_of_string num_str.value)
+        | IdxIdx id_str when is_numeric id_str.value ->
+            make_tuple_selector (int_of_string id_str.value)
+        | IdxIdx id_str ->
+            make_record_selector id_str.value
+        | IdxLab lab_str ->
+            make_record_selector lab_str.value
+        | IdxVar _ | IdxLong _ ->
+            (* Shouldn't happen for selectors, but handle gracefully *)
+            failwith "Unexpected index type in record selector"
+      )
     | ArrayExp exps -> Builder.pexp_array (List.map process_exp exps) 
     | ListExp exps ->
         (* Build list from right to left using :: *)
@@ -363,7 +566,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         in
         build_seq exps
     | LetExp ([], exps) ->
-        process_exp { value = SeqExp exps; pos = expression.pos }
+        process_exp { value = SeqExp exps; pos = expression.pos; comments = [] }
     | LetExp (dec :: decs, exps) -> (
         
         (* First, flatten SeqDec to handle each declaration individually *)
@@ -378,7 +581,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         (* Process flattened declarations *)
         let all_decs = flattened_decs @ decs in
         match all_decs with
-        | [] -> process_exp { value = SeqExp exps; pos = expression.pos }
+        | [] -> process_exp { value = SeqExp exps; pos = expression.pos; comments = [] }
         | first_dec :: rest_decs -> (
             Log.log ~subgroup:"let-expr" ~level:Debug ~kind:Neutral
               ~msg:(Printf.sprintf "Processing LetExp with declaration: %s"
@@ -405,8 +608,8 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 let exn_constrs = process_exn_bind eb.value in
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 (* Build nested let exception expressions *)
                 List.fold_right
@@ -428,12 +631,12 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                         Builder.pstr_type Asttypes.Recursive tb_decls;
                       ]
                 in
-                let mod_name = ghost (Some "_Types") in
+                let mod_name = ghost (Some "Types_") in
                 let mod_expr = Builder.pmod_structure type_items in
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 Builder.pexp_letmodule mod_name mod_expr body
             | TypDec tb ->
@@ -444,12 +647,12 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 let type_items =
                   [ Builder.pstr_type Asttypes.Nonrecursive tdecls ]
                 in
-                let mod_name = ghost (Some "_Types") in
+                let mod_name = ghost (Some "Types_") in
                 let mod_expr = Builder.pmod_structure type_items in
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 Builder.pexp_letmodule mod_name mod_expr body
             | LocalDec (d1, d2) ->
@@ -461,6 +664,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                   {
                     value = LetExp ([ d1; d2 ] @ rest_decs, exps);
                     pos = expression.pos;
+                    comments = [];
                   }
             | OpenDec ids ->
                 (* Handle open declarations in let expressions *)
@@ -468,15 +672,23 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 (* OCaml: let open M in ... *)
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 (* Process open declarations from right to left to maintain proper scoping *)
                 List.fold_right
                   (fun (id : Ast.idx Ast.node) acc ->
-                    let longid =
-                      build_longident (idx_to_name id.value)
-                    in
+                    let module_path = idx_to_name id.value in
+                    let module_name = String.concat "." module_path in
+                    (* Try to load module constructors from manifest *)
+                    let search_paths = ["."] in (* TODO: add configured include paths *)
+                    let _loaded = ContextLib.load_module_constructors
+                      Ctx.context ~module_name ~search_paths in
+                    (* Bring constructors from module into unqualified scope *)
+                    Context.Constructor_registry.open_module
+                      Ctx.context.constructor_registry
+                      ~module_path;
+                    let longid = build_longident module_path in
                     let mod_expr = Builder.pmod_ident (ghost longid) in
                     let open_infos =
                       Builder.open_infos ~override:Asttypes.Fresh ~expr:mod_expr
@@ -486,7 +698,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             | FixityDec _ ->
                 (* Fixity declarations have no runtime effect - skip and process rest *)
                 process_exp
-                  { value = LetExp (rest_decs, exps); pos = expression.pos }
+                  { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
             | DataDecAlias (id1, id2) ->
                 (* Datatype alias in let expression *)
                 (* SML: let datatype t = datatype u in ... end *)
@@ -499,7 +711,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 in
                 let alias_type = Builder.ptyp_constr (ghost longid2) [] in
                 let tdecl =
-                  labeller#cite Helpers.Attr.type_declaration id1.pos
+                  labeller#cite Helpers.Attr.type_declaration id1.comments
                     (Builder.type_declaration ~name:(ghost name1_str) ~params:[]
                        ~cstrs:[] ~kind:Parsetree.Ptype_abstract
                        ~private_:Asttypes.Public ~manifest:(Some alias_type))
@@ -507,12 +719,12 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 let type_items =
                   [ Builder.pstr_type Asttypes.Recursive [ tdecl ] ]
                 in
-                let mod_name = ghost (Some "_Types") in
+                let mod_name = ghost (Some "Types_") in
                 let mod_expr = Builder.pmod_structure type_items in
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 Builder.pexp_letmodule mod_name mod_expr body
             | AbstractDec (db, tb_opt, inner_decs) ->
@@ -522,6 +734,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                   {
                     value = LetExp (inner_decs @ rest_decs, exps);
                     pos = expression.pos;
+                    comments = [];
                   }
             | StrDec _ ->
                 (* Structure declarations are not allowed in let expressions per SML spec *)
@@ -535,14 +748,15 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                   {
                     value = LetExp (inner_decs @ rest_decs, exps);
                     pos = expression.pos;
+                    comments = [];
                   }
             | ValDec _ ->
                 (* Handle value declarations in let expressions *)
                 let binding = process_value_dec first_dec.value in
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 Builder.pexp_let Nonrecursive binding body
             | FunDec _ ->
@@ -550,8 +764,8 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 let binding = process_value_dec first_dec.value in
                 let body =
                   process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos }
-                  |> labeller#cite Helpers.Attr.expression expression.pos
+                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+                  |> labeller#cite Helpers.Attr.expression expression.comments
                 in
                 Builder.pexp_let Recursive binding body)
         | _ -> assert false)
@@ -584,11 +798,11 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         (* fn match -> function ... *)
         process_fun_exp cases.value
     end in
-    (* Still call cite to accumulate comments, won't attach as attributes *)
-    let result = labeller#cite Helpers.Attr.expression expression.pos res in
-    (* Exit accumulation mode *)
-    labeller#exit_accumulate_context;
-    result
+    (* Attach AST-distributed comments, then extract any remaining comments
+       from the regex pool that fall within this expression's byte range *)
+    res
+    |> labeller#cite Helpers.Attr.expression expression.comments
+    |> labeller#cite_for_node Helpers.Attr.expression expression.pos
 
   (** Convert SML function expression to OCaml.
       Literal translation - currying is handled by ocaml.ml post-processing.
@@ -610,7 +824,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
     let res = match row.value with
     | Row (lab, expression, rest_opt) ->
         let lab_longident =
-          build_longident (idx_to_name lab.value)
+          build_longident (List.map process_lowercase (idx_to_name lab.value))
         in
         (ghost lab_longident, process_exp expression) in
     res
@@ -696,7 +910,6 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
          | PatWildcard -> "PatWildcard"
          | PatIdx _ -> "PatIdx"
          | PatApp _ -> "PatApp"
-         | PatInfix _ -> "PatInfix"
          | PatParen _ -> "PatParen"
          | PatTuple _ -> "PatTuple"
          | PatRecord _ -> "PatRecord"
@@ -707,8 +920,104 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
          | PatOr _ -> "PatOr") ^ " " ^ dbg)
         is_head is_arg)
       ();
-    (* Enter accumulation mode for comment hoisting *)
-    labeller#enter_accumulate_context;
+    (* Comments attach directly as attributes on pattern nodes (Immediate mode) *)
+
+    let rec process_resolved_pat ~is_arg ~is_head (resolved : Precedence_resolver.resolved_pat) : Parsetree.pattern =
+      Log.log ~subgroup:"pattern_resolved" ~level:Debug ~kind:Neutral
+        ~msg:(Printf.sprintf "Processing resolved pattern: %s (is_head=%b, is_arg=%b)"
+          (match resolved with
+           | ResolvedPatSingle _ -> "ResolvedPatSingle"
+           | ResolvedPatApp _ -> "ResolvedPatApp"
+           | ResolvedPatInfix _ -> "ResolvedPatInfix")
+          is_head is_arg)
+        ();
+      
+      let res = begin match resolved with
+      | ResolvedPatSingle p ->
+          process_pat ~is_arg ~is_head { value = p; pos = None; comments = [] }
+
+      | ResolvedPatApp (f, args) ->
+          (* Pattern application: constructor with arguments *)
+          (* First check if f is a simple constructor *)
+          (match f with
+          | ResolvedPatSingle (PatIdx wo) ->
+              (match wo.value with
+              | WithoutOp idx ->
+                  let name = idx_to_name idx.value in
+                  let simple_name = name_to_string name in
+                  (* Special case: ref patterns become record patterns { contents = x } *)
+                  if simple_name = "ref" && List.length args = 1 then
+                    let arg_pat = process_pat ~is_arg:true ~is_head:false (List.hd args) in
+                    Builder.ppat_record
+                      [(ghost (Longident.Lident "contents"), arg_pat)]
+                      Closed
+                  else begin
+                  (* Extract module path if qualified *)
+                  let qual_path =
+                    if List.length name > 1 then
+                      Some (List.rev (List.tl (List.rev name)))
+                    else None
+                  in
+                  (* Head of pattern application is always a constructor *)
+                  let lookup_result = Context.Constructor_registry.lookup
+                    Ctx.context.constructor_registry ~path:qual_path simple_name in
+                  let transformed_parts = match lookup_result with
+                    | Some ctor ->
+                        (match qual_path with
+                         | Some path -> path @ [ctor.Context.Constructor_registry.ocaml_name]
+                         | None -> [ctor.ocaml_name])
+                    | None ->
+                        let transformed_name = Backend_utils.transform_constructor simple_name in
+                        (match qual_path with
+                         | Some path -> path @ [transformed_name]
+                         | None -> [transformed_name])
+                  in
+                  let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                  let arg_pats = List.map (fun arg -> process_pat ~is_arg:true ~is_head:false arg) args in
+                  let arg_pattern = match arg_pats with
+                    | [] -> None
+                    | [single] -> Some (Builder.ppat_tuple [single])
+                    | _ -> Some (Builder.ppat_tuple arg_pats)
+                  in
+                  Builder.ppat_construct (ghost name_longident) arg_pattern
+                  end
+              | WithOp _ ->
+                  (* op prefix - build as tuple *)
+                  let f_pat = process_resolved_pat ~is_arg:false ~is_head:true f in
+                  let arg_pats = List.map (fun arg -> process_pat ~is_arg:true ~is_head:false arg) args in
+                  Builder.ppat_tuple (f_pat :: arg_pats))
+          | _ ->
+              (* Complex pattern - build as tuple *)
+              let f_pat = process_resolved_pat ~is_arg:false ~is_head:true f in
+              let arg_pats = List.map (fun arg -> process_pat ~is_arg:true ~is_head:false arg) args in
+              Builder.ppat_tuple (f_pat :: arg_pats))
+
+      | ResolvedPatInfix (left, op, right) ->
+          (* Binary infix pattern - check constructor registry *)
+          let op_name = idx_to_string op.value in
+          let left_pat = process_resolved_pat ~is_arg:false ~is_head:false left in
+          let right_pat = process_resolved_pat ~is_arg:false ~is_head:false right in
+
+          let lookup_result = Context.Constructor_registry.lookup
+            Ctx.context.constructor_registry ~path:None op_name in
+          (match lookup_result with
+          | Some ctor ->
+              (* Constructor like :: *)
+              let name_longident = build_longident [ctor.Context.Constructor_registry.ocaml_name] in
+              let tuple = Builder.ppat_tuple [left_pat; right_pat] in
+              Builder.ppat_construct (ghost name_longident) (Some tuple)
+          | None ->
+              (* Should not happen - operators in patterns should be constructors *)
+              failwith (Printf.sprintf "Unknown pattern operator: %s" op_name))
+          end in
+      Log.log_fmt ~subgroup:"pattern_resolved" ~level:Debug ~kind:Neutral
+        ~msg:(Fmt.concat Fmt.[
+          const string "Resolved pattern converted to OCaml: ";
+          const string @@ Precedence_resolver.show_resolved_pat resolved ;
+          const string " -> ";
+          const Format_lib.pattern res
+        ]) (); res
+    in
 
     let res = begin match pat.value with
     | PatCon c -> Builder.ppat_constant (process_con c)
@@ -717,55 +1026,104 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         match wo.value with
         | WithOp op ->
             let op_name = idx_to_name op.value in
-            let op_str = idx_to_string op.value in
-            if (is_head || not (is_variable_identifier op_str)) then
-              let name_longident = build_longident op_name in
-              Builder.ppat_construct (ghost name_longident) None
-            else
-              let name_str = process_lowercase (name_to_string op_name) in
-              Builder.ppat_var (ghost name_str)
+            let simple_name = name_to_string op_name in
+            (* Extract module path if qualified *)
+            let qual_path =
+              if List.length op_name > 1 then
+                Some (List.rev (List.tl (List.rev op_name)))
+              else None
+            in
+            (* Try to look up as constructor *)
+            let lookup_result = Context.Constructor_registry.lookup
+              Ctx.context.constructor_registry ~path:qual_path simple_name in
+            (match lookup_result with
+            | Some ctor_info when is_head || Option.is_some qual_path || not (is_variable_identifier simple_name) ->
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+                  | None -> [ctor_info.ocaml_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | None when is_head ->
+                (* Head of pattern application: always a constructor *)
+                let transformed_name = Backend_utils.transform_constructor simple_name in
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [transformed_name]
+                  | None -> [transformed_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | _ ->
+                let name_str = Backend_utils.transform_to_lowercase simple_name in
+                Builder.ppat_var (ghost name_str))
         | WithoutOp id ->
             let id_name = idx_to_name id.value in
-            let id_str = idx_to_string id.value in
-            if is_head || not (is_variable_identifier id_str) then
-              let name_longident = build_longident id_name in
-              Builder.ppat_construct (ghost name_longident) None
-            else
-              let name_str = process_lowercase (name_to_string id_name) in
-              Builder.ppat_var (ghost name_str))
-    | PatApp (node, p) when pat_head_eq_ref node -> let loc = Ppxlib.Location.none in ([%pat? { contents = [%p process_pat ~is_arg ~is_head p] }])
-    | PatApp (wo, p) ->
-        (* Constructor application: SOME x *)
-        let const_name = process_with_op wo.value in
-        let arg_pat = process_pat p in
-        Builder.ppat_construct
-          (ghost (build_longident [ const_name ]))
-          (Some arg_pat)
-    | PatInfix (p1, id, p2) ->
-        (* Infix constructor pattern: x :: xs *)
-        let op_longident =
-          build_longident (idx_to_name id.value)
+            let simple_name = name_to_string id_name in
+            let qual_path =
+              if List.length id_name > 1 then
+                Some (List.rev (List.tl (List.rev id_name)))
+              else None
+            in
+            let lookup_result = Context.Constructor_registry.lookup
+              Ctx.context.constructor_registry ~path:qual_path simple_name in
+            (match lookup_result with
+            | Some ctor_info when is_head || Option.is_some qual_path || not (is_variable_identifier simple_name) ->
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+                  | None -> [ctor_info.ocaml_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | None when is_head ->
+                (* Head of pattern application: always a constructor *)
+                let transformed_name = Backend_utils.transform_constructor simple_name in
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [transformed_name]
+                  | None -> [transformed_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | _ ->
+                let name_str = Backend_utils.transform_to_lowercase simple_name in
+                Builder.ppat_var (ghost name_str)))
+    | PatApp pat_list ->
+        (* Resolve precedence to get structured pattern *)
+        let resolved = Precedence_resolver.resolve_pat_precedence pat_list in
+        process_resolved_pat ~is_arg ~is_head resolved
+    (* TODO: PatInfix removed - will be replaced by precedence-resolved PatApp *)
+    (* | PatInfix (p1, id, p2) ->
+        let op_name = idx_to_string id.value in
+        let lookup_result = Context.Constructor_registry.lookup
+          Ctx.context.constructor_registry ~path:None op_name in
+        let final_name = match lookup_result with
+          | Some ctor_info -> ctor_info.Context.Constructor_registry.ocaml_name
+          | None -> op_name
         in
+        let op_longident = build_longident [final_name] in
         let p1' = process_pat p1 in
         let p2' = process_pat p2 in
         Builder.ppat_construct (ghost op_longident)
-          (Some (Builder.ppat_tuple [ p1'; p2' ]))
+          (Some (Builder.ppat_tuple [ p1'; p2' ])) *)
     | PatParen p -> process_pat p
     | PatTuple [] ->
         Builder.ppat_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | PatTuple ps -> 
         let pat_list = process_tuple_pat is_arg ps in
         pat_list
+    | PatRecord [] ->
+        Builder.ppat_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | PatRecord rows ->
         let fields =
           List.flatten (List.map (fun r -> process_pat_row r.Ast.value) rows)
         in
-        Builder.ppat_record
-          (List.map
-             (fun (lab, pat) ->
-               (ghost (build_longident [ lab ]), pat))
-             fields)
-          Closed
+        if fields = [] then Builder.ppat_any
+        else
+          Builder.ppat_record
+            (List.map
+               (fun (lab, pat) ->
+                 (ghost (build_longident [ lab ]), pat))
+               fields)
+            Closed
     | PatArray pats -> Builder.ppat_array (List.map (fun p -> process_pat ~is_arg ~is_head p) pats)
     | PatList pats ->
         (* Build list pattern from right to left *)
@@ -784,25 +1142,25 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
           | WithOp id -> idx_to_name id.value
           | WithoutOp id -> idx_to_name id.value
         in
-        let var_str = process_lowercase (name_to_string var_name) in
+        let var_str = Backend_utils.transform_to_lowercase (name_to_string var_name) in
         let inner_pat = process_pat ~is_arg ~is_head p in
         let final_pat =
           match t_opt with
           | None -> inner_pat
           | Some ty -> Builder.ppat_constraint inner_pat (process_type ty)
         in
-        labeller#cite Helpers.Attr.pattern pat.pos
+        labeller#cite Helpers.Attr.pattern pat.comments
         @@ Builder.ppat_alias final_pat (ghost var_str)
         | PatOr(p1, p2) -> 
             let p1' = process_pat ~is_arg ~is_head p1 in
             let p2' = process_pat ~is_arg ~is_head p2 in
             Builder.ppat_or p1' p2'
     end in
-    (* Still call cite to accumulate comments, won't attach as attributes *)
-    let result = labeller#cite Helpers.Attr.pattern pat.pos res in
-    (* Exit accumulation mode *)
-    labeller#exit_accumulate_context;
-    result
+    (* Attach AST-distributed comments, then extract any remaining comments
+       from the regex pool that fall within this pattern's byte range *)
+    res
+    |> labeller#cite Helpers.Attr.pattern pat.comments
+    |> labeller#cite_for_node Helpers.Attr.pattern pat.pos
   (** Convert SML pattern rows (record pattern fields) to OCaml record patterns.
 
       SML record patterns have three forms:
@@ -821,7 +1179,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         []
     | PatRowSimple (lab, pat, rest) -> (
         let lab_str =
-          name_to_string (idx_to_name lab.value)
+          process_lowercase (name_to_string (idx_to_name lab.value))
         in
         let pat' = process_pat pat in
         let here = (lab_str, pat') in
@@ -830,7 +1188,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         | other -> here :: process_pat_row other)
     | PatRowVar (id, ty_opt, as_opt, rest_opt) -> (
         (* {x, y} is shorthand for {x = x, y = y} *)
-        let id_str = name_to_string (idx_to_name id.value) in
+        let id_str = process_lowercase (name_to_string (idx_to_name id.value)) in
         let var_pat = Builder.ppat_var (ghost id_str) in
         let pat_with_type =
           match ty_opt with
@@ -842,7 +1200,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
           | None -> pat_with_type
           | Some as_id ->
               let as_name =
-                process_lowercase (name_to_string (idx_to_name as_id.value))
+                escape_keyword (process_lowercase (name_to_string (idx_to_name as_id.value)))
               in
               Builder.ppat_alias pat_with_type (ghost as_name)
         in
@@ -944,25 +1302,34 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
 
       @param vb The value binding(s)
       @return List of OCaml value bindings *)
+  and flat_val_bind (vb : Ast.value_binding) : Ppxlib.Ast.rec_flag * (Ast.pat node * Ast.expression node) list =
+    match vb with
+    | ValBind (pat, expression, rest_opt) ->
+        let recursive , rest = match rest_opt with None -> Asttypes.Nonrecursive , [] | Some r -> flat_val_bind r.value in
+        recursive, ((pat, expression) :: rest)
+    | ValBindRec vb ->
+        (* Recursive value bindings *)
+        let _, vb' = flat_val_bind vb.value in
+        (Asttypes.Recursive, vb')
   and process_val_bind (vb : Ast.value_binding) : Parsetree.value_binding list =
+    let (rec_flag, bindings) = flat_val_bind vb in
+      process_val_bindings rec_flag bindings
+
+  and process_val_bindings (recursive : Asttypes.rec_flag) (bindings : (Ast.pat node * Ast.expression node) list) : Parsetree.value_binding list =
     Log.log ~subgroup:"binding" ~level:Debug ~kind:Neutral
       ~msg:"Processing value binding"
       ();
-    match vb with
-    | ValBind (pat, expression, rest_opt) ->
-        let pat' = process_pat pat in
-        let expression' = process_exp expression in
-        let binding =
-          labeller#cite Helpers.Attr.value_binding pat.pos
-            (Builder.value_binding ~pat:pat' ~expr:expression')
-        in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_val_bind r.value
-        in
-        binding :: rest
-    | ValBindRec vb ->
-        (* Recursive value bindings *)
-        process_val_bind vb.value
+    List.map (fun (pat, exp) ->
+      let pat' = process_pat pat in 
+      let exp' = process_exp exp in
+      let vb = Builder.value_binding ~pat:pat' ~expr:exp' in
+      (* Attach comments to the value binding *)
+      let vb_with_comments =
+        labeller#cite Helpers.Attr.value_binding pat.comments
+        @@ labeller#cite_for_node Helpers.Attr.value_binding pat.pos
+        @@ vb      in
+      vb_with_comments) bindings
+
 
   (** Convert SML function bindings to OCaml.
 
@@ -985,12 +1352,14 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
     | FunBind (fm, rest_opt) ->
         (* Get the function name from the first match *)
         let fname_str =
-          match fm.value with
+          let raw_name = match fm.value with
           | FunMatchPrefix (wo, _, _, _, _) -> process_with_op wo.value
           | FunMatchInfix (_, id, _, _, _, _) ->
               name_to_string (idx_to_name id.value)
           | FunMatchLow (_, id, _, _, _, _, _) ->
               name_to_string (idx_to_name id.value)
+          in
+          Backend_utils.transform_to_lowercase raw_name
         in
         Log.log ~subgroup:"function" ~level:Debug ~kind:Neutral
           ~msg:(Printf.sprintf "Function name: %s" fname_str)
@@ -1061,8 +1430,9 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
 
         let pat = Builder.ppat_var (ghost fname_str) in
         let binding =
-          labeller#cite Helpers.Attr.value_binding fm.pos
-            (Builder.value_binding ~pat ~expr:body)
+          Builder.value_binding ~pat ~expr:body
+          |> labeller#cite Helpers.Attr.value_binding fm.comments
+          |> labeller#cite_for_node Helpers.Attr.value_binding fm.pos
         in
 
         let rest =
@@ -1152,10 +1522,10 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         let name_str =
           name_to_string (idx_to_name id.value)
         in
-        let params = Type_var_utils.process_type_params tvars in
+        let params = Backend_utils.process_type_params tvars in
         let manifest = Some (process_type ty) in
         let tdecl =
-          labeller#cite Helpers.Attr.type_declaration id.pos
+          labeller#cite Helpers.Attr.type_declaration id.comments
             (Builder.type_declaration ~name:(ghost name_str) ~params ~cstrs:[]
                ~kind:Parsetree.Ptype_abstract ~private_:Asttypes.Public
                ~manifest)
@@ -1185,10 +1555,10 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         Log.log ~subgroup:"datatype" ~level:Debug ~kind:Neutral
           ~msg:(Printf.sprintf "Datatype name: %s" name_str)
           ();
-        let params = Type_var_utils.process_type_params tvars in
+        let params = Backend_utils.process_type_params tvars in
         let constructors = process_con_bind cb.value in
         let tdecl =
-          labeller#cite Helpers.Attr.type_declaration id.pos
+          labeller#cite Helpers.Attr.type_declaration id.comments
             (Builder.type_declaration ~name:(ghost name_str) ~params ~cstrs:[]
                ~kind:(Parsetree.Ptype_variant constructors)
                ~private_:Asttypes.Public ~manifest:None)
@@ -1208,14 +1578,27 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
     | ConBind (id, ty_opt, rest_opt) ->
         let original_name = idx_to_name id.value in
         let name_str = name_to_string original_name in
+        (* Register constructor in registry *)
+        register_constructor name_str;
+        (* Use transformed name for constructor declaration *)
+        let transformed_name = Backend_utils.transform_constructor name_str in
         let args =
           match ty_opt with
           | None -> Parsetree.Pcstr_tuple []
-          | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
+          | Some ty -> (
+              match ty.value with
+              | TypRecord fields ->
+                  (* Inline record: Foo of {x: int, y: int} → Foo of { x: int; y: int } *)
+                  let labels =
+                    List.flatten
+                      (List.map (fun f -> process_label_declaration f) fields)
+                  in
+                  Parsetree.Pcstr_record labels
+              | _ -> Parsetree.Pcstr_tuple [ process_type ty ])
         in
         let cdecl =
-          labeller#cite Helpers.Attr.constructor_declaration id.pos
-            (Builder.constructor_declaration ~name:(ghost name_str) ~args
+          labeller#cite Helpers.Attr.constructor_declaration id.comments
+            (Builder.constructor_declaration ~name:(ghost transformed_name) ~args
                ~res:None)
         in
         let rest =
@@ -1238,14 +1621,18 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
     | ExnBind (id, ty_opt, rest_opt) ->
         let original_name = idx_to_name id.value in
         let name_str = name_to_string original_name in
+        (* Register exception as constructor in registry *)
+        register_constructor name_str;
+        (* Use transformed name for exception declaration *)
+        let transformed_name = Backend_utils.transform_constructor name_str in
         let args =
           match ty_opt with
           | None -> Parsetree.Pcstr_tuple []
           | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
         in
         let ext_constr =
-          labeller#cite Helpers.Attr.exception_constructor id.pos
-            (Builder.extension_constructor ~name:(ghost name_str)
+          labeller#cite Helpers.Attr.exception_constructor id.comments
+            (Builder.extension_constructor ~name:(ghost transformed_name)
                ~kind:(Parsetree.Pext_decl ([], args, None)))
         in
         let rest =
@@ -1256,11 +1643,13 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         let name1_str =
           name_to_string (idx_to_name id1.value)
         in
+        (* Register aliased exception as constructor *)
+        register_constructor name1_str;
         let longid2 =
           build_longident (idx_to_name id2.value)
         in
         let ext_constr =
-          labeller#cite Helpers.Attr.exception_constructor id1.pos
+          labeller#cite Helpers.Attr.exception_constructor id1.comments
             (Builder.extension_constructor ~name:(ghost name1_str)
                ~kind:(Parsetree.Pext_rebind (ghost longid2)))
         in
@@ -1277,8 +1666,8 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
       @return The identifier string *)
   and process_with_op (wo : Ast.with_op) : string =
     match wo with
-    | WithOp id -> idx_to_string id.value
-    | WithoutOp id -> idx_to_string id.value
+    | WithOp id -> name_to_string (idx_to_name id.value)
+    | WithoutOp id -> name_to_string (idx_to_name id.value)
 
   (** {1 Structure Processing}
 
@@ -1316,7 +1705,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         in
         Builder.pstr_module
           (Builder.module_binding
-             ~name:(ghost (Some (idx_to_string id.value)))
+             ~name:(ghost (Some (name_to_string (idx_to_name id.value))))
              ~expr:(Builder.pmod_ident (ghost name)))
         :: []
     | StructStr declaration ->
@@ -1337,7 +1726,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         in
         Builder.pstr_module
           (Builder.module_binding
-             ~name:(ghost (Some (idx_to_string id.value)))
+             ~name:(ghost (Some (name_to_string (idx_to_name id.value))))
              ~expr:mod_expr)
         :: []
     | FunctorAppAnonymous (_id, declaration) ->
@@ -1370,7 +1759,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         let longid =
           build_longident (idx_to_name id.value)
         in
-        labeller#cite Helpers.Attr.module_expr id.pos
+        labeller#cite Helpers.Attr.module_expr id.comments
           (Builder.pmod_ident (ghost longid))
     | StructStr declaration ->
         (* struct ... end - convert declarations to structure *)
@@ -1427,8 +1816,31 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             let name_str =
               name_to_string (idx_to_name id.value)
             in
+            (* Check if this is a module alias (structure I = M) *)
+            (match structure.value with
+            | StrIdx target_id ->
+                (* This is a module alias - register it so constructors are accessible *)
+                let target_path = idx_to_name target_id.value in
+                Context.Constructor_registry.add_module_alias
+                  Ctx.context.constructor_registry
+                  ~alias:[name_str]
+                  ~target:target_path
+            | _ -> ());
+            (* Push module name onto path for constructor registration *)
+            push_module name_str;
+            (* Push structure boundary so leading_comments inside the
+               struct body doesn't reach back past the struct keyword *)
+            let saved_boundary =
+              match structure.pos with
+              | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
+              | None -> labeller#push_structure_boundary 0
+            in
             (* Convert the structure body to a module expression *)
             let module_expr = structure_to_module_expr structure.value in
+            (* Restore boundary for outer scope *)
+            labeller#restore_structure_boundary saved_boundary;
+            (* Pop module name from path *)
+            pop_module ();
             let module_expr_with_sig =
               match annot_opt with
               | None -> module_expr
@@ -1440,7 +1852,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                   | Opaque -> Builder.pmod_constraint module_expr module_type)
             in
             let binding =
-              labeller#cite Helpers.Attr.module_binding id.pos
+              labeller#cite Helpers.Attr.module_binding id.comments
                 (Builder.module_binding ~name:(ghost (Some name_str))
                    ~expr:module_expr_with_sig)
             in
@@ -1485,12 +1897,15 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             let longid =
               build_longident (idx_to_name id.value)
             in
-            labeller#cite Helpers.Attr.module_type id.pos
+            labeller#cite Helpers.Attr.module_type id.comments
               (Builder.pmty_ident (ghost longid))
         | SignSig specification ->
             (* sig specification end - process specifications *)
             let specification' =
-              List.flatten (List.map process_spec specification)
+              List.flatten (List.map (fun spec_node ->
+                let leading = labeller#leading_signature_comments (node_start_pos spec_node) in
+                let items = process_spec spec_node in
+                leading @ items) specification)
             in
             Builder.pmty_signature specification'
         | SignWhere (s, _tr) ->
@@ -1558,7 +1973,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             in
             let alias_type = Builder.ptyp_constr (ghost longid2) [] in
             let tdecl =
-              labeller#cite Helpers.Attr.type_declaration id1.pos
+              labeller#cite Helpers.Attr.type_declaration id1.comments
                 (Builder.type_declaration ~name:(ghost name1_str) ~params:[]
                    ~cstrs:[] ~kind:Parsetree.Ptype_abstract
                    ~private_:Asttypes.Public ~manifest:(Some alias_type))
@@ -1569,7 +1984,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             List.map
               (fun ec ->
                 let type_exn =
-                  labeller#cite Helpers.Attr.exception_declaration ed.pos
+                  labeller#cite Helpers.Attr.exception_declaration ed.comments
                     (Builder.type_exception ec)
                 in
                 Builder.psig_exception type_exn)
@@ -1577,11 +1992,16 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         | SpecStr sd ->
             let mdecls = process_str_specification sd.value in
             List.map (fun md -> Builder.psig_module md) mdecls
-        | SpecSeq (s1, s2) -> List.append (process_spec s1) (process_spec s2)
+        | SpecSeq (s1, s2) ->
+            let leading1 = labeller#leading_signature_comments (node_start_pos s1) in
+            let spec1 = process_spec s1 in
+            let leading2 = labeller#leading_signature_comments (node_start_pos s2) in
+            let spec2 = process_spec s2 in
+            leading1 @ spec1 @ leading2 @ spec2
         | SpecInclude s ->
             let module_type = process_sign s.value in
             let incl_info =
-              labeller#cite Helpers.Attr.include_infos specification'.pos
+              labeller#cite Helpers.Attr.include_infos specification'.comments
                 (Builder.include_infos module_type)
             in
             [ Builder.psig_include incl_info ]
@@ -1595,7 +2015,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                    in
                    let module_type = Builder.pmty_ident (ghost longid) in
                    let incl_info =
-                     labeller#cite Helpers.Attr.include_infos id.pos
+                     labeller#cite Helpers.Attr.include_infos id.comments
                        (Builder.include_infos module_type)
                    in
                    [ Builder.psig_include incl_info ])
@@ -1622,11 +2042,11 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         match vd with
         | ValDesc (id, ty, rest_opt) ->
             let name_str =
-              name_to_string (idx_to_name id.value)
+              escape_keyword (process_lowercase @@ name_to_string (idx_to_name id.value))
             in
             let core_type = process_type ty in
             let vdesc =
-              labeller#cite Helpers.Attr.value_description id.pos
+              labeller#cite Helpers.Attr.value_description id.comments
                 (Builder.value_description ~name:(ghost name_str)
                    ~type_:core_type ~prim:[])
             in
@@ -1650,9 +2070,9 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             let name_str =
               name_to_string (idx_to_name id.value)
             in
-            let params = Type_var_utils.process_type_params tvars in
+            let params = Backend_utils.process_type_params tvars in
             let tdecl =
-              labeller#cite Helpers.Attr.type_declaration id.pos
+              labeller#cite Helpers.Attr.type_declaration id.comments
                 (Builder.type_declaration ~name:(ghost name_str) ~params
                    ~cstrs:[] ~kind:Parsetree.Ptype_abstract
                    ~private_:Asttypes.Public ~manifest:None)
@@ -1677,10 +2097,10 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             let name_str =
               name_to_string (idx_to_name id.value)
             in
-            let params = Type_var_utils.process_type_params tvars in
+            let params = Backend_utils.process_type_params tvars in
             let constructors = process_con_specification cd.value in
             let tdecl =
-              labeller#cite Helpers.Attr.type_declaration id.pos
+              labeller#cite Helpers.Attr.type_declaration id.comments
                 (Builder.type_declaration ~name:(ghost name_str) ~params
                    ~cstrs:[] ~kind:(Parsetree.Ptype_variant constructors)
                    ~private_:Asttypes.Public ~manifest:None)
@@ -1704,7 +2124,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         | ConDesc (id, ty_opt, rest_opt) ->
             (* Same as process_con_bind *)
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Backend_utils.transform_constructor (name_to_string (idx_to_name id.value))
             in
             let args =
               match ty_opt with
@@ -1712,7 +2132,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
             in
             let cdecl =
-              labeller#cite Helpers.Attr.constructor_declaration id.pos
+              labeller#cite Helpers.Attr.constructor_declaration id.comments
                 (Builder.constructor_declaration ~name:(ghost name_str) ~args
                    ~res:None)
             in
@@ -1735,7 +2155,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
         | ExnDesc (id, ty_opt, rest_opt) ->
             (* Similar to process_exn_bind but for signatures *)
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Backend_utils.transform_constructor (name_to_string (idx_to_name id.value))
             in
             let args =
               match ty_opt with
@@ -1743,7 +2163,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
             in
             let ext_constr =
-              labeller#cite Helpers.Attr.exception_constructor id.pos
+              labeller#cite Helpers.Attr.exception_constructor id.comments
                 (Builder.extension_constructor ~name:(ghost name_str)
                    ~kind:(Parsetree.Pext_decl ([], args, None)))
             in
@@ -1769,7 +2189,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             in
             let module_type = process_sign s.value in
             let mdecl =
-              labeller#cite Helpers.Attr.module_declaration id.pos
+              labeller#cite Helpers.Attr.module_declaration id.comments
                 (Builder.module_declaration ~name:(ghost (Some name_str))
                    ~type_:module_type)
             in
@@ -1848,7 +2268,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             in
             let alias_type = Builder.ptyp_constr (ghost longid2) [] in
             let tdecl =
-              labeller#cite Helpers.Attr.type_declaration id1.pos
+              labeller#cite Helpers.Attr.type_declaration id1.comments
                 (Builder.type_declaration ~name:(ghost name1_str) ~params:[]
                    ~cstrs:[] ~kind:Parsetree.Ptype_abstract
                    ~private_:Asttypes.Public ~manifest:(Some alias_type))
@@ -1864,7 +2284,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             List.map
               (fun ec ->
                 let type_exn =
-                  labeller#cite Helpers.Attr.exception_declaration eb.pos
+                  labeller#cite Helpers.Attr.exception_declaration eb.comments
                     (Builder.type_exception ec)
                 in
                 Builder.pstr_exception type_exn)
@@ -1874,19 +2294,31 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             List.map (fun mb -> Builder.pstr_module mb) module_bindings
         | SeqDec decs ->
             List.concat
-              (List.map (fun d -> dec_to_structure_items d.Ast.value) decs)
+              (List.map (fun d ->
+                let leading = labeller#leading_comments (node_start_pos d) in
+                let node_cmts = labeller#comments_to_structure_items d.Ast.comments in
+                let items = dec_to_structure_items d.Ast.value in
+                leading @ node_cmts @ items) decs)
         | LocalDec (d1, d2) ->
             (* Local declarations - both visible at top level in OCaml *)
             dec_to_structure_items d1.value @ dec_to_structure_items d2.value
         | OpenDec ids ->
             List.map
               (fun (id : Ast.idx Ast.node) ->
-                let longid =
-                  build_longident (idx_to_name id.value)
-                in
+                let module_path = idx_to_name id.value in
+                let module_name = String.concat "." module_path in
+                (* Try to load module constructors from manifest *)
+                let search_paths = ["."] in (* TODO: add configured include paths *)
+                let _loaded = ContextLib.load_module_constructors
+                  Ctx.context ~module_name ~search_paths in
+                (* Bring constructors from module into unqualified scope *)
+                Context.Constructor_registry.open_module
+                  Ctx.context.constructor_registry
+                  ~module_path;
+                let longid = build_longident module_path in
                 let module_expr = Builder.pmod_ident (ghost longid) in
                 let open_info =
-                  labeller#cite Helpers.Attr.open_infos id.pos
+                  labeller#cite Helpers.Attr.open_infos id.comments
                     (Builder.open_infos ~override:Asttypes.Fresh ~expr:module_expr)
                 in
                 Builder.pstr_open open_info)
@@ -1911,16 +2343,35 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
          | ProgSeq _ -> "ProgSeq"
          | ProgEmpty -> "ProgEmpty"))
       ();
+    (* Emit node-level comments as standalone Pstr_attribute items, tracked by labeller *)
+    let emit_node_comments (comments : string list) : Parsetree.structure_item list =
+      labeller#comments_to_structure_items comments
+    in
     let res = trace_part ~level:5 ~ast:"prog" ~msg:"" ~value:(fun () ->
         match prog with
-        | ProgDec declaration -> dec_to_structure_items declaration.value
+        | ProgDec declaration ->
+            let leading = labeller#leading_comments (node_start_pos declaration) in
+            let node_cmts = emit_node_comments declaration.comments in
+            let items = dec_to_structure_items declaration.value in
+            leading @ node_cmts @ items
         | ProgFun fb ->
             let module_bindings = process_functor_binding fb.value in
-            List.map (fun mb -> Builder.pstr_module mb) module_bindings
+            let leading = labeller#leading_comments (node_start_pos fb) in
+            let node_cmts = emit_node_comments fb.comments in
+            leading @ node_cmts @ List.map (fun mb -> Builder.pstr_module mb) module_bindings
         | ProgStr sb ->
             let mtdecls = process_signature_binding sb.value in
-            List.map (fun mtd -> Builder.pstr_modtype mtd) mtdecls
-        | ProgSeq (p1, p2) -> process_prog p1.value @ process_prog p2.value
+            let leading = labeller#leading_comments (node_start_pos sb) in
+            let node_cmts = emit_node_comments sb.comments in
+            leading @ node_cmts @ List.map (fun mtd -> Builder.pstr_modtype mtd) mtdecls
+        | ProgSeq (p1, p2) ->
+            let leading1 = labeller#leading_comments (node_start_pos p1) in
+            let cmts1 = emit_node_comments p1.comments in
+            let prog1 = process_prog p1.value in
+            let leading2 = labeller#leading_comments (node_start_pos p2) in
+            let cmts2 = emit_node_comments p2.comments in
+            let prog2 = process_prog p2.value in
+            leading1 @ cmts1 @ prog1 @ leading2 @ cmts2 @ prog2
         | ProgEmpty -> []) in
     res
 
@@ -1955,8 +2406,14 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               (* Process parameter signature *)
               let param_module_type = process_sign sig1.value in
 
-              (* Process functor body *)
+              (* Process functor body with scoped structure boundary *)
+              let saved_boundary =
+                match body.pos with
+                | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
+                | None -> labeller#push_structure_boundary 0
+              in
               let body_items = process_str body.value in
+              labeller#restore_structure_boundary saved_boundary;
               let body_module_expr = Builder.pmod_structure body_items in
 
               (* Add result signature constraint if present *)
@@ -1977,7 +2434,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               in
 
               let binding =
-                labeller#cite Helpers.Attr.module_binding name.pos
+                labeller#cite Helpers.Attr.module_binding name.comments
                   (Builder.module_binding ~name:(ghost (Some fname_str))
                      ~expr:functor_expr)
               in
@@ -2000,8 +2457,14 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                 Builder.pmty_signature param_module_spec
               in
 
-              (* Process functor body *)
+              (* Process functor body with scoped structure boundary *)
+              let saved_boundary =
+                match body.pos with
+                | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
+                | None -> labeller#push_structure_boundary 0
+              in
               let body_items = process_str body.value in
+              labeller#restore_structure_boundary saved_boundary;
               let body_module_expr = Builder.pmod_structure body_items in
 
               (* Add result signature constraint if present *)
@@ -2022,7 +2485,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               in
 
               let binding =
-                labeller#cite Helpers.Attr.module_binding name.pos
+                labeller#cite Helpers.Attr.module_binding name.comments
                   (Builder.module_binding ~name:(ghost (Some fname_str))
                      ~expr:functor_expr)
               in
@@ -2048,8 +2511,14 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
                     Builder.pmty_signature []
                 | Some (_annot, sig1) -> process_sign sig1.value
               in
-              (* Process functor body *)
+              (* Process functor body with scoped structure boundary *)
+              let saved_boundary =
+                match str.pos with
+                | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
+                | None -> labeller#push_structure_boundary 0
+              in
               let body_items = process_str str.value in
+              labeller#restore_structure_boundary saved_boundary;
               let body_module_expr = Builder.pmod_structure body_items in
 
               (* Add result signature constraint if present *)
@@ -2068,7 +2537,7 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
               in
 
               let binding =
-                labeller#cite Helpers.Attr.module_binding idx.pos
+                labeller#cite Helpers.Attr.module_binding idx.comments
                   (Builder.module_binding ~name:(ghost (Some fname_str))
                      ~expr:functor_expr)
               in
@@ -2099,9 +2568,17 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
             let name_str =
               name_to_string (idx_to_name id.value)
             in
+            (* Push structure boundary so leading_signature_comments inside the
+               sig body doesn't reach back past the sig keyword *)
+            let saved_boundary =
+              match s.pos with
+              | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
+              | None -> labeller#push_structure_boundary 0
+            in
             let module_type = process_sign s.value in
+            labeller#restore_structure_boundary saved_boundary;
             let mtdecl =
-              labeller#cite Helpers.Attr.module_type_declaration id.pos
+              labeller#cite Helpers.Attr.module_type_declaration id.comments
                 (Builder.module_type_declaration ~name:(ghost name_str)
                    ~type_:(Some module_type))
             in
@@ -2114,12 +2591,22 @@ module Make (Context : CONTEXT) (Config : CONFIG) = struct
 
   (** Main entry point for converting a complete SML program. Wraps the
       converted structure in a toplevel phrase for output. *)
-  and process_sml ~(prog : Ast.prog) : res =
+  and process_sml ?(header: string list=[]) ~(prog : Ast.prog) : res =
     let output_src =
-      match Common.get_verbosity config with None -> false | Some n -> n >= 2
+      Common.get (Shell_flag Verbosity) config >= 2
     in
     if output_src then Stdlib.Format.eprintf "@,Lexical source: @[%s@]@," lexbuf;
     let structure = process_prog prog in
+    let trailing = labeller#flush_all_remaining_as_structure_items in
+    let structure = structure @ trailing in
+    let header_infos : Ppxlib.Ast.include_declaration list = List.map (fun src -> Builder.(include_infos (pmod_ident (ghost (Longident.Lident src))))) header in
+    let header_ast = List.map (fun info -> Builder.pstr_include info) header_infos in
+    let full = header_ast @ structure in
     let _ = labeller#destruct () in
-    [ Parsetree.Ptop_def structure ]
+    labeller#check_all_comments_emitted;
+    [ Parsetree.Ptop_def full ]
+
+  (** Get all constructors from the registry for manifest generation *)
+  let get_all_constructors () : Context.Constructor_registry.constructor_info list =
+    Context.Constructor_registry.get_all_constructors Ctx.context.constructor_registry
 end

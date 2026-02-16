@@ -7,6 +7,12 @@ module type CONTEXT = sig
   val context : Context.t
 end
 
+(** Common exception for AST processing errors *)
+exception BadAst of (Lexing.position * Lexing.position) option * string
+
+(** Create a BadAst exception with an optional location *)
+let mkBadAst ?loc (msg : string) : exn = BadAst (loc, msg)
+
 module type BACKEND = sig
   module Config : Common.CONFIG
 
@@ -14,13 +20,16 @@ module type BACKEND = sig
 
   type res = Parsetree.toplevel_phrase list
 
-  val process_sml : prog:Ast.prog -> res
+  val process_sml : ?header:string list -> prog:Ast.prog -> res
 
   val process_type_value : Ast.typ Ast.node -> Parsetree.core_type
   (** Exported for testing *)
 
   val process_object_field_type :
     Ast.typ_row Ast.node -> Parsetree.object_field list
+
+  val process_label_declaration :
+    Ast.typ_row Ast.node -> Parsetree.label_declaration list
 
   val process_type : Ast.typ Ast.node -> Parsetree.core_type
   val process_con : Ast.constant Ast.node -> Parsetree.constant
@@ -36,4 +45,7 @@ module type BACKEND = sig
   val process_dat_bind : Ast.data_binding -> Parsetree.type_declaration list
   val process_exn_bind : Ast.exn_bind -> Parsetree.extension_constructor list
   val process_prog : Ast.prog -> Parsetree.structure
+
+  val get_all_constructors :
+    unit -> Context.Constructor_registry.constructor_info list
 end

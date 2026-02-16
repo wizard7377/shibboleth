@@ -9,11 +9,40 @@ exception Dir_exists of path
 exception Input_output_same_dir of path
 exception Dir_create_error of path
 
+let rec styles (s : Fmt.style list) : 'a Fmt.t -> 'a Fmt.t =
+  match s with [] -> Fun.id | s :: r -> fun f -> Fmt.styled s (styles r f)
+
+let summary : (int * int * int) Fmt.t =
+  Fmt.vbox
+  Fmt.(
+       styled `Bold (const string "Conversion Complete:")
+       ++ cut
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> total - failures - warnings)
+               (const string "Successes:" ++ sp ++ styles [ `Green; `Bold ] int)
+            ) ++ cut
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> warnings)
+               (const string "Warnings:" ++ sp ++ styles [ `Yellow; `Bold ] int)
+            ) ++ cut 
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> failures)
+               (const string "Failures:" ++ sp ++ styles [ `Red; `Bold ] int)
+            ) ++ cut
+       ++ hbox
+            (using
+               (fun (failures, warnings, total) -> total)
+               (const string "Total:" ++ sp ++ styles [ `Blue; `Bold ] int)
+            ) ++ cut)
+
 let path_to_string (p : path) : string = Fpath.to_string p
 let string_to_path (s : string) : path = Fpath.v s
 
 let convert_file ~(input_files : path list) ?(output_file : path option)
-    ~(options : Common.options) : int =
+    ?(store : Context.t option) ~(options : Common.t) : int =
   let input_files'' =
     match input_files with
     | [] -> Common.StdIn
@@ -25,18 +54,44 @@ let convert_file ~(input_files : path list) ?(output_file : path option)
     | Some p -> Common.FileOut (path_to_string p)
   in
   let cfg =
-    Common.mkOptions ~input_file:input_files'' ~output_file:output_target
-      ~verbosity:(Common.get_verbosity options)
-      ~conversions:(Common.get_conversions options)
-      ~concat_output:(Common.get_concat_output options)
-      ~force:(Common.get_force options) ~quiet:(Common.get_quiet options)
-      ~guess_var:(Common.get_guess_var options)
-      ~debug:(Common.get_debug options)
-      ~check_ocaml:(Common.get_check_ocaml options)
-      ~variable_regex:(Common.get_variable_regex options)
-      ()
+    Common.create
+      Common.
+        [
+          set (File_flag Input_file) input_files'';
+          set (File_flag Output_file) output_target;
+          set (Shell_flag Verbosity) (Common.get (Shell_flag Verbosity) options);
+          set (Convert_flag Convert_names)
+            (Common.get (Convert_flag Convert_names) options);
+          set (Convert_flag Convert_keywords)
+            (Common.get (Convert_flag Convert_keywords) options);
+          set (Convert_flag Rename_types)
+            (Common.get (Convert_flag Rename_types) options);
+          set (Convert_flag Curry_expressions)
+            (Common.get (Convert_flag Curry_expressions) options);
+          set (Convert_flag Curry_types)
+            (Common.get (Convert_flag Curry_types) options);
+          set (Convert_flag Toplevel_names)
+            (Common.get (Convert_flag Toplevel_names) options);
+          set (Misc_flag Concat_output)
+            (Common.get (Misc_flag Concat_output) options);
+          set (Shell_flag Force) (Common.get (Shell_flag Force) options);
+          set (Shell_flag Quiet) (Common.get (Shell_flag Quiet) options);
+          set (Shell_flag Debug) (Common.get (Shell_flag Debug) options);
+          set (Misc_flag Check_ocaml)
+            (Common.get (Misc_flag Check_ocaml) options);
+          set (Misc_flag Dash_to_underscore)
+            (Common.get (Misc_flag Dash_to_underscore) options);
+          set (File_flag Context_output)
+            (Common.get (File_flag Context_output) options);
+          set (File_flag Context_input)
+            (Common.get (File_flag Context_input) options);
+        ]
   in
-  let process = new process cfg in
+  let process =
+    match store with
+    | Some s -> new process ~store:s cfg
+    | None -> new process cfg
+  in
   let res = process#run input_files'' in
   res
 
@@ -106,17 +161,21 @@ let copy_file ?(force = false) (src : path) (dst : path) : unit =
             ())
       else ()
 
-(* Directory, normal, source *)
-let partition_files (files : path list) : path list * path list * path list =
+(* Directory, normal, source, cm *)
+let partition_files (files : path list) :
+    path list * path list * path list * path list =
   let dirs, rest = List.partition is_directory files in
-  let source_files, normal_files =
+  let source_files, rest' =
     List.partition
       (fun p ->
         let ext = Fpath.get_ext p in
         ext = ".sml" || ext = ".sig" || ext = ".fun")
       rest
   in
-  (dirs, normal_files, source_files)
+  let cm_files, normal_files =
+    List.partition (fun p -> Fpath.get_ext p = ".cm") rest'
+  in
+  (dirs, normal_files, source_files, cm_files)
 
 let get_priority = function ".sig" -> 3 | ".fun" -> 2 | ".sml" -> 1 | _ -> 0
 
@@ -130,9 +189,11 @@ let order_files (input_path0 : path) (input_path1 : path) : int =
   | n -> n
 
 let process_sml_files (input_path : path) (output_path : path)
-    (sml_files : path list) (options : Common.options) : int * int * int =
+    (sml_files : path list) (options : Common.t) : int * int * int =
   let files = List.map Fpath.rem_ext sml_files in
   let groups = List.sort_uniq Fpath.compare files in
+  (* Shared store accumulates context (e.g. constructors) across all groups *)
+  let shared_store = Context.create (Context.Info.create []) in
   let res =
     List.map
       (fun f ->
@@ -157,12 +218,12 @@ let process_sml_files (input_path : path) (output_path : path)
           in
           (* Convert dashes to underscores in both directory and file paths *)
           let output_path' =
-            if Common.get_dash_to_underscore options then
+            if Common.get (Misc_flag Dash_to_underscore) options then
               Common.convert_path_dashes_to_underscores output_path
             else output_path
           in
           let f' =
-            if Common.get_dash_to_underscore options then
+            if Common.get (Misc_flag Dash_to_underscore) options then
               Common.convert_path_dashes_to_underscores f
             else f
           in
@@ -174,7 +235,7 @@ let process_sml_files (input_path : path) (output_path : path)
           let should_convert =
             match Bos.OS.File.exists output_file with
             | Ok true ->
-                if Common.get_force options then true
+                if Common.get (Shell_flag Force) options then true
                 else begin
                   Printf.eprintf
                     "Skipping %s (already exists, use --force to overwrite)\n"
@@ -187,7 +248,8 @@ let process_sml_files (input_path : path) (output_path : path)
 
           if should_convert then
             let status =
-              convert_file ~input_files:existing_files_abs ~output_file ~options
+              convert_file ~input_files:existing_files_abs ~output_file
+                ~store:shared_store ~options
             in
             status
           else 0 (* Skip this file, count as success *))
@@ -205,8 +267,8 @@ let process_sml_files (input_path : path) (output_path : path)
 
   (failures, warnings, List.length res)
 
-let convert_group ~(input_dir : path) ~(output_dir : path)
-    ~(options : Common.options) : int =
+let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
+    : int =
   (* Check if input and output are the same *)
   if Fpath.equal input_dir output_dir then begin
     Printf.eprintf "Input and output directories cannot be the same.\n";
@@ -217,7 +279,7 @@ let convert_group ~(input_dir : path) ~(output_dir : path)
   let dir_exists =
     Result.value ~default:false @@ Bos.OS.Dir.exists output_dir
   in
-  if dir_exists && not (Common.get_force options) then begin
+  if dir_exists && not (Common.get (Shell_flag Force) options) then begin
     Printf.eprintf
       "Output directory %s already exists. Use --force to overwrite existing \
        files.\n"
@@ -232,7 +294,9 @@ let convert_group ~(input_dir : path) ~(output_dir : path)
   let all_files = list_contents_rec input_dir in
   (* Make paths absolute for partition_files by joining with input_dir *)
   let all_files_abs = List.map (fun f -> Fpath.( // ) input_dir f) all_files in
-  let dirs, normal_files, source_files = partition_files all_files_abs in
+  let dirs, normal_files, source_files, cm_files =
+    partition_files all_files_abs
+  in
   (* Convert back to relative paths *)
   let to_relative p =
     match Fpath.rem_prefix input_dir p with Some rel -> rel | None -> p
@@ -240,23 +304,48 @@ let convert_group ~(input_dir : path) ~(output_dir : path)
   let dirs_rel = List.map to_relative dirs in
   let normal_files_rel = List.map to_relative normal_files in
   let source_files_rel = List.map to_relative source_files in
+  let cm_files_rel = List.map to_relative cm_files in
   let _ =
     List.iter (fun d -> create_dir (Fpath.( // ) output_dir d)) dirs_rel
   in
   let _ =
     List.iter
       (fun f ->
-        copy_file ~force:(Common.get_force options) (Fpath.( // ) input_dir f)
+        copy_file
+          ~force:(Common.get (Shell_flag Force) options)
+          (Fpath.( // ) input_dir f)
           (Fpath.( // ) output_dir f))
       normal_files_rel
+  in
+  (* Convert .cm files to dune files *)
+  let _ =
+    try
+      begin
+        List.iter
+          (fun f ->
+            let cm_path = Fpath.( // ) input_dir f in
+            match Bos.OS.File.read cm_path with
+            | Ok content ->
+                let dir_name =
+                  Fpath.parent f |> Fpath.rem_empty_seg |> Fpath.basename
+                in
+                let parsed = Pkg.Cm.parse content in
+
+                let dune_content =
+                  Pkg.Cm.to_dune ~cfg:options ~dir_name parsed
+                in
+                let dune_path =
+                  Fpath.( // ) output_dir
+                    (Fpath.( // ) (Fpath.parent f) (Fpath.v "dune"))
+                in
+                Bos.OS.File.write dune_path dune_content |> ignore
+            | Error _ -> ())
+          cm_files_rel
+      end
+    with _ -> ()
   in
   let failures, warnings, total =
     process_sml_files input_dir output_dir source_files_rel options
   in
-  let () =
-    Printf.printf
-      "Conversion complete: %d successes, %d warnings, %d failures %d total.\n"
-      (total - failures - warnings)
-      warnings failures total
-  in
+  let () = summary Format.err_formatter (failures, warnings, total) in
   if failures = 0 then 0 else 1

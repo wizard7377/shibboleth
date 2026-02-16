@@ -6,13 +6,13 @@ type input = Common.source
 type output = Common.target
 
 module Log = Common.Make (struct
-  let config = Common.mkOptions ()
+  let config = Common.create []
   let group = "process"
 end)
 
-class process ?(store = Context.create []) cfg_init =
+class process ?(store = Context.create (Context.Info.create [])) cfg_init =
   object (self)
-    val mutable cfg : options = cfg_init
+    val mutable cfg : t = cfg_init
     val mutable store : Context.t = store
     val mutable successes : int = 0
     val mutable failures : int = 0
@@ -21,37 +21,97 @@ class process ?(store = Context.create []) cfg_init =
     val mutable has_errors : bool = false
     val mutable errors_store : (string * string) list = []
     val mutable warning_store : (string * string) list = []
+
+    val mutable accumulated_contexts :
+      Context.Constructor_manifest.t list = []
     method set_config c = cfg <- c
     method get_config () = cfg
     method get_store () = store
     method set_store s = store <- s
 
-    method private write_output (content : string) : bool =
-      match get_output_file cfg with
+    method private get_output_path : Fpath.t option =
+      match Common.get (File_flag Output_file) cfg with
       | FileOut path ->
           let fpath = Fpath.v path in
           let path' =
-            if Common.get_dash_to_underscore cfg then
+            if Common.get (Misc_flag Dash_to_underscore) cfg then
               Common.convert_path_dashes_to_underscores fpath
             else fpath
           in
-          (* Ensure parent directory exists *)
-          let parent_dir = Fpath.parent path' in
-          let _ = Bos.OS.Dir.create ~path:true parent_dir in
-          let _ = Bos.OS.File.delete path' in
-          let oc = open_out (Fpath.to_string path') in
+          Some path'
+      | _ -> None
+    (** Convert output file path, applying dash-to-underscore transformation if
+        enabled. Returns None if output mode is not FileOut. *)
+
+    method private ensure_parent_dir (path : Fpath.t) : unit =
+      let parent_dir = Fpath.parent path in
+      let _ = Bos.OS.Dir.create ~path:true parent_dir in
+      ()
+    (** Ensure parent directory exists for a file path. *)
+
+    method private write_output (content : string) : bool =
+      match self#get_output_path with
+      | Some path ->
+          self#ensure_parent_dir path;
+          let _ = Bos.OS.File.delete path in
+          let oc = open_out (Fpath.to_string path) in
           output_string oc content;
           close_out oc;
           true
-      | StdOut ->
+      | None ->
           print_string content;
           true
-      | Silent ->
-          print_string content;
-          true
+    (** Write content to the configured output target. Handles file path
+        transformations (dash→underscore), directory creation, and different
+        output modes (file, stdout, silent). *)
+
+    method private load_input_context : unit =
+      match Common.get (File_flag Context_input) cfg with
+      | Some path -> (
+          try
+            let modules =
+              Context.Constructor_manifest.read_combined_file path
+            in
+            List.iter
+              (fun (mc : Context.Constructor_manifest.module_context) ->
+                List.iter
+                  (fun (ci : Context.Constructor_registry.constructor_info) ->
+                    Context.Constructor_registry.add_constructor
+                      store.constructor_registry ~path:ci.path ~name:ci.name
+                      ~ocaml_name:ci.ocaml_name)
+                  mc.constructors)
+              modules;
+            Log.log ~level:Medium ~kind:Neutral
+              ~msg:(Printf.sprintf "Loaded context from %s" path)
+              ()
+          with e ->
+            Log.log ~level:High ~kind:Warning
+              ~msg:
+                (Printf.sprintf "Failed to load context from %s: %s" path
+                   (Printexc.to_string e))
+              ())
+      | None -> ()
+
+    method private write_output_context : unit =
+      match Common.get (File_flag Context_output) cfg with
+      | Some path -> (
+          try
+            Context.Constructor_manifest.write_combined_file path
+              (Context.Constructor_manifest.concat accumulated_contexts);
+            Log.log ~level:Medium ~kind:Neutral
+              ~msg:(Printf.sprintf "Wrote combined context to %s" path)
+              ()
+          with e ->
+            Log.log ~level:High ~kind:Warning
+              ~msg:
+                (Printf.sprintf "Failed to write combined context to %s: %s"
+                   path (Printexc.to_string e))
+              ())
+      | None -> ()
 
     method run (input : input) : int =
       try
+        self#load_input_context;
         match input with
         | File files ->
             total <- List.length files;
@@ -64,6 +124,7 @@ class process ?(store = Context.create []) cfg_init =
                      ()))
                 errors_store
             else ();
+            self#write_output_context;
             res
         | StdIn -> assert false
       with e ->
@@ -77,6 +138,47 @@ class process ?(store = Context.create []) cfg_init =
         has_errors <- true;
         1
 
+    method private append_to_output (content : string) : unit =
+      match self#get_output_path with
+      | Some path ->
+          self#ensure_parent_dir path;
+          let _ = Bos.OS.File.delete path in
+          let existing = Bos.OS.File.read path in
+          let new_content =
+            match existing with
+            | Error _ -> content
+            | Ok prev -> prev ^ "\n\n" ^ content
+          in
+          Bos.OS.File.write path new_content |> ignore
+      | None -> print_string content
+    (** Append content to output file, or overwrite if file doesn't exist. *)
+
+    method private write_error_file (source_file : string) : unit =
+      match self#get_output_path with
+      | Some base_path -> (
+          let error_path = Fpath.(base_path + ".error") in
+          self#ensure_parent_dir error_path;
+          match Bos.OS.File.read (Fpath.v source_file) with
+          | Ok content -> Bos.OS.File.write error_path content |> ignore
+          | Error _ -> ())
+      | None -> ()
+    (** Write error file for failed conversions (contains original SML source).
+    *)
+
+    method private record_check_result (file : string)
+        (checked : Process_common.check_result) : unit =
+      match checked with
+      | Process_common.Good -> successes <- successes + 1
+      | Process_common.Bad err ->
+          warning_store <-
+            (file, Printexc.to_string (Syntaxerr.Error err)) :: warning_store;
+          warnings <- warnings + 1
+      | Process_common.Err e ->
+          errors_store <- (file, Printexc.to_string e) :: errors_store;
+          has_errors <- true;
+          failures <- failures + 1
+    (** Record check result in statistics. *)
+
     method private run_files (files : string list) : int =
       let res =
         List.mapi
@@ -88,85 +190,31 @@ class process ?(store = Context.create []) cfg_init =
               ();
             try
               let ocaml_code, checked = self#run_single_file file in
-              let output_target = get_output_file cfg in
-
-              (match output_target with
-              | FileOut path ->
-                  let fpath = Fpath.v path in
-                  let path' =
-                    if Common.get_dash_to_underscore cfg then
-                      Common.convert_path_dashes_to_underscores fpath
-                    else fpath
-                  in
-                  (* Ensure parent directory exists *)
-                  let parent_dir = Fpath.parent path' in
-                  let _ = Bos.OS.Dir.create ~path:true parent_dir in
-                  let _ = Bos.OS.File.delete path' in
-                  let contents = Bos.OS.File.read path' in
-                  let new_contents =
-                    match contents with
-                    | Error _ -> ocaml_code
-                    | Ok existing_content ->
-                        existing_content ^ "\n\n" ^ ocaml_code
-                  in
-                  Bos.OS.File.write path' new_contents |> ignore
-              | StdOut -> print_string ocaml_code
-              | Silent -> print_string ocaml_code);
-              begin match checked with
-              | Process_common.Good -> successes <- successes + 1
-              | Process_common.Bad err ->
-                  warning_store <-
-                    (file, Printexc.to_string (Syntaxerr.Error err))
-                    :: warning_store;
-                  warnings <- warnings + 1
-              | Process_common.Err e ->
-                  errors_store <- (file, Printexc.to_string e) :: errors_store;
-                  has_errors <- true;
-                  failures <- failures + 1
-              end;
+              (* Record success/warning/failure *)
+              self#record_check_result file checked;
+              (* Write immediately if not concat mode *)
+              if not (Common.get (Misc_flag Concat_output) cfg) then
+                ignore (self#write_output ocaml_code);
               ocaml_code
             with e ->
               errors_store <- (file, Printexc.to_string e) :: errors_store;
               has_errors <- true;
               failures <- failures + 1;
-              begin match get_output_file cfg with
-              | FileOut out_path -> begin
-                  let content = Bos.OS.File.read (Fpath.v file) in
-                  let error_fpath = Fpath.v (out_path ^ ".error") in
-                  let error_path' =
-                    if Common.get_dash_to_underscore cfg then
-                      Common.convert_path_dashes_to_underscores error_fpath
-                    else error_fpath
-                  in
-                  (* Ensure parent directory exists *)
-                  let parent_dir = Fpath.parent error_path' in
-                  let _ = Bos.OS.Dir.create ~path:true parent_dir in
-                  match content with
-                  | Ok existing_content ->
-                      Bos.OS.File.write error_path' existing_content |> ignore
-                  | Error _ -> ()
-                end
-              | _ -> ()
-              end;
+              self#write_error_file file;
               raise e)
           files
       in
-      let _ =
-        if Common.get_concat_output cfg then
-          let _ = self#write_output @@ String.concat "\n\n\n" res in
-          0
-        else (
-          List.iter
-            (fun code ->
-              let _ = self#write_output code in
-              ())
-            res;
-          0)
+      (* In concat mode, write all results at once *)
+      if Common.get (Misc_flag Concat_output) cfg then
+        ignore (self#write_output @@ String.concat "\n\n\n" res);
+
+      (* Log summary *)
+      let summary_kind =
+        if failures > 0 then Negative
+        else if warnings > 0 then Warning
+        else Positive
       in
-      Log.log ~level:High
-        ~kind:
-          (if failures == 0 then if warnings == 0 then Positive else Warning
-           else Negative)
+      Log.log ~level:High ~kind:summary_kind
         ~msg:
           (Printf.sprintf
              "Processing complete: %d successes, %d warnings, %d failures out \
@@ -174,42 +222,72 @@ class process ?(store = Context.create []) cfg_init =
              successes warnings failures total)
         ();
       Log.log ~level:Medium ~kind:Neutral
-        ~msg:
-          (Printf.sprintf "Processed these files: %s" (String.concat ", " files))
+        ~msg:(Printf.sprintf "Processed files: %s" (String.concat ", " files))
         ();
-      if failures = 0 then if warnings = 0 then 0 else 2 else 1
+
+      (* Return exit code: 0=success, 1=errors, 2=warnings *)
+      if failures > 0 then 1 else if warnings > 0 then 2 else 0
+    (** Process multiple files, collecting their outputs. *)
+
+    method private log_verbose (msg : string) : unit =
+      if Common.get (Shell_flag Verbosity) cfg > 2 then
+        Log.log_with ~cfg ~level:Low ~kind:Neutral ~msg ()
+    (** Log verbose message if verbosity level is high enough. *)
 
     method private run_single_file (file : string) :
         string * Process_common.check_result =
       Log.log ~level:Medium ~kind:Positive
         ~msg:(Printf.sprintf "Processing file: %s" file)
         ();
+
+      (* Read source file *)
       let ic = open_in file in
-      let len = in_channel_length ic in
-      let content = really_input_string ic len in
-      let process = new process_file cfg in
+      let content = really_input_string ic (in_channel_length ic) in
       close_in ic;
+
+      (* Create processor and run pipeline, passing accumulated store *)
+      let process = new process_file ~store cfg in
       let sml_ast = process#parse_sml content in
-      if Common.get_verbosity_default cfg 0 > 2 then
-        Log.log_with ~cfg ~level:Low ~kind:Neutral
-          ~msg:"Finished parsing SML AST." ();
+      self#log_verbose "Finished parsing SML AST.";
+
       let ocaml_ast = process#convert_to_ocaml sml_ast in
-      if Common.get_verbosity_default cfg 0 > 2 then
-        Log.log_with ~cfg ~level:Low ~kind:Neutral
-          ~msg:"Finished converting to OCaml AST." ();
+      self#log_verbose "Finished converting to OCaml AST.";
+
+      (* Accumulate constructors for combined context output and feed back into store *)
+      let constructors = process#get_constructors in
+      if constructors <> [] then begin
+        let module_path =
+          match Common.get (File_flag Output_file) cfg with
+          | FileOut p -> p
+          | _ -> file
+        in
+        accumulated_contexts <-
+          Context.Constructor_manifest.
+            [{ module_path; constructors }]
+          :: accumulated_contexts;
+        (* Merge discovered constructors back into the shared store *)
+        List.iter
+          (fun (ci : Context.Constructor_registry.constructor_info) ->
+            Context.Constructor_registry.add_constructor
+              store.constructor_registry ~path:ci.path ~name:ci.name
+              ~ocaml_name:ci.ocaml_name)
+          constructors
+      end;
+
       let ocaml_code' = process#print_ocaml ocaml_ast in
-      if Common.get_verbosity_default cfg 0 > 2 then
-        Log.log_with ~cfg ~level:Low ~kind:Neutral
-          ~msg:"Finished printing OCaml code." ();
+      self#log_verbose "Finished printing OCaml code.";
+
       let ocaml_code = Polish.polish ocaml_code' in
-      if Common.get_verbosity_default cfg 0 > 2 then
-        Log.log_with ~cfg ~level:Low ~kind:Neutral
-          ~msg:"Finished polishing OCaml code." ();
+      self#log_verbose "Finished polishing OCaml code.";
+
+      (* Validate if requested *)
       let checked =
-        if Common.get_check_ocaml cfg then
+        if Common.get (Misc_flag Check_ocaml) cfg then
           Process_common.check_output ~config:cfg ocaml_code
         else Process_common.Good
       in
-      let _ = checked in
       (ocaml_code, checked)
+    (** Process a single SML file through the complete pipeline.
+        @param file Path to SML source file
+        @return Tuple of (OCaml code, validation result) *)
   end

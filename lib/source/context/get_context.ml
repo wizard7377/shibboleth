@@ -3,8 +3,6 @@
 
 open Ast
 
-let empty_context : Info.t = Info.create []
-
 (** Extract the string name from an idx node *)
 let rec idx_to_string (idx : idx) : string =
   match idx with
@@ -39,14 +37,14 @@ let rec process_con_specification ~(path : string list) ~(type_name : string)
       let rest =
         match rest_opt with
         | Some rest_node -> process_con_specification ~path ~type_name rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       let full_name : Info.name = { path; root = name } in
       let context1 = Info.create [ (full_name, info) ] in
       let context2 =
         match rest_opt with
         | Some rest_node -> process_con_specification ~path ~type_name rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge context1 context2
 
@@ -60,7 +58,7 @@ let rec process_dat_specification ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_dat_specification ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge cons rest
 
@@ -68,20 +66,20 @@ let rec process_dat_specification ~(path : string list)
 let rec process_specification ~(path : string list) (spec : specification node)
     : Info.t =
   match unbox_node spec with
-  | SpecVal _ -> Info.create []
-  | SpecTyp _ -> Info.create []
-  | SpecEqtyp _ -> Info.create []
-  | SpecTypBind _ -> Info.create []
+  | SpecVal _ -> Info.empty
+  | SpecTyp _ -> Info.empty
+  | SpecEqtyp _ -> Info.empty
+  | SpecTypBind _ -> Info.empty
   | SpecDat dat_spec -> process_dat_specification ~path dat_spec
-  | SpecDatAlias (_, _) -> Info.create []
-  | SpecExn _ -> Info.create []
+  | SpecDatAlias (_, _) -> Info.empty
+  | SpecExn _ -> Info.empty
   | SpecStr str_spec -> process_str_specification ~path str_spec
   | SpecSeq (s1, s2) ->
       Info.merge
         (process_specification ~path s1)
         (process_specification ~path s2)
   | SpecInclude sig_node -> process_signature ~path sig_node
-  | SpecIncludeIdx _ -> Info.create []
+  | SpecIncludeIdx _ -> Info.empty
   | SpecSharingTyp (spec_node, _) -> process_specification ~path spec_node
   | SpecSharingStr (spec_node, _) -> process_specification ~path spec_node
 
@@ -96,7 +94,7 @@ and process_str_specification ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_str_specification ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge sigs rest
 
@@ -104,12 +102,12 @@ and process_str_specification ~(path : string list)
 and process_signature ~(path : string list) (sig_node : signature node) : Info.t
     =
   match unbox_node sig_node with
-  | SignIdx _ -> Info.create []
+  | SignIdx _ -> Info.empty
   | SignSig specs ->
       specs
       |> List.fold_left
            (fun acc spec -> Info.merge acc (process_specification ~path spec))
-           (Info.create [])
+           (Info.empty)
   | SignWhere (sig_inner, _) -> process_signature ~path sig_inner
 
 (** Process a constructor_binding node (for datatypes in declarations) *)
@@ -126,7 +124,7 @@ let rec process_constructor_binding ~(path : string list) ~(type_name : string)
         match rest_opt with
         | Some rest_node ->
             process_constructor_binding ~path ~type_name rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge info rest
 
@@ -140,7 +138,7 @@ let rec process_data_binding ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_data_binding ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge cons rest
 
@@ -148,7 +146,7 @@ let rec process_data_binding ~(path : string list)
 let rec process_structure ~(path : string list) (str : structure node) : Info.t
     =
   match unbox_node str with
-  | StrIdx _ -> Info.create []
+  | StrIdx _ -> Info.empty
   | StructStr dec -> process_declaration ~path dec
   | AnotateStr (_, _, str_inner) -> process_structure ~path str_inner
   | FunctorApp (_, str_inner) -> process_structure ~path str_inner
@@ -168,13 +166,13 @@ and process_structure_binding ~(path : string list)
       let sigs =
         match sig_opt with
         | Some (_, sig_node) -> process_signature ~path:new_path sig_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       let struct_info = process_structure ~path:new_path struct_node in
       let rest =
         match rest_opt with
         | Some rest_node -> process_structure_binding ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge (Info.merge sigs struct_info) rest
 
@@ -182,31 +180,31 @@ and process_structure_binding ~(path : string list)
 and process_declaration ~(path : string list) (dec : declaration node) : Info.t
     =
   match unbox_node dec with
-  | ValDec (_, _) -> Info.create []
-  | FunDec _ -> Info.create []
-  | TypDec _ -> Info.create []
+  | ValDec (_, _) -> Info.empty
+  | FunDec _ -> Info.empty
+  | TypDec _ -> Info.empty
   | DatDec (dat_bind, _) -> process_data_binding ~path dat_bind
-  | DataDecAlias (_, _) -> Info.create []
+  | DataDecAlias (_, _) -> Info.empty
   | AbstractDec (dat_bind, _, decs) ->
       Info.merge
         (process_data_binding ~path dat_bind)
         (decs
         |> List.fold_left
              (fun acc dec -> Info.merge acc (process_declaration ~path dec))
-             (Info.create []))
-  | ExnDec _ -> Info.create []
+             (Info.empty))
+  | ExnDec _ -> Info.empty
   | StrDec str_bind -> process_structure_binding ~path str_bind
   | SeqDec decs ->
       decs
       |> List.fold_left
            (fun acc dec -> Info.merge acc (process_declaration ~path dec))
-           (Info.create [])
+           (Info.empty)
   | LocalDec (dec1, dec2) ->
       Info.merge
         (process_declaration ~path dec1)
         (process_declaration ~path dec2)
-  | OpenDec _ -> Info.create []
-  | FixityDec (_, _) -> Info.create []
+  | OpenDec _ -> Info.empty
+  | FixityDec (_, _) -> Info.empty
 
 (** Process a functor_binding node *)
 let rec process_functor_binding ~(path : string list)
@@ -220,7 +218,7 @@ let rec process_functor_binding ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_functor_binding ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge (Info.merge param_sigs body_result) rest
   | FctGen (name_node, result_sig_opt, body, rest_opt) ->
@@ -230,7 +228,7 @@ let rec process_functor_binding ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_functor_binding ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge body_result rest
   | FctBindOpen (name_node, spec, _result_sig_opt, body, rest_opt) ->
@@ -241,7 +239,7 @@ let rec process_functor_binding ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_functor_binding ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge (Info.merge specs body_result) rest
 
@@ -256,7 +254,7 @@ let rec process_signature_binding ~(path : string list)
       let rest =
         match rest_opt with
         | Some rest_node -> process_signature_binding ~path rest_node
-        | None -> Info.create []
+        | None -> Info.empty
       in
       Info.merge sigs rest
 
@@ -275,4 +273,4 @@ and process_prog ~(path : string list) (prog : Ast.prog) : Info.t =
       Info.merge
         (process_prog ~path (unbox_node p1))
         (process_prog ~path (unbox_node p2))
-  | ProgEmpty -> Info.create []
+  | ProgEmpty -> Info.empty

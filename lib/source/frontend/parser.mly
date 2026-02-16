@@ -5,9 +5,11 @@
     (* Alias for convenience *)
     let b = box_node
 
-    (* Helper to create node with position information *)
+    (* Helper to create node with position information.
+       Comments are NOT captured here - they are captured at specific
+       grammar rule levels where comment boundaries are well-defined. *)
     let bp (v : 'a) (start_pos : Lexing.position) (end_pos : Lexing.position) : 'a node =
-      { value = v; pos = Some (start_pos, end_pos) }
+      { value = v; pos = Some (start_pos, end_pos); comments = [] }
 
     (* Helper to convert ident to idx *)
     let ident_to_idx = function
@@ -30,6 +32,26 @@
       match specification.value with
       | SpecSeq (s1, s2) -> flatten_spec_node s1 @ flatten_spec_node s2
       | _ -> [specification]
+
+    (* Convert FFI attribute string to ffi_attr *)
+    let ffi_attr_of_string s =
+      match s with
+      | "alloc" -> FFIAlloc
+      | "cdecl" -> FFICDecl
+      | "external" -> FFIExternal
+      | "impure" -> FFIImpure
+      | "private" -> FFIPrivate
+      | "public" -> FFIPublic
+      | "pure" -> FFIPure
+      | "reentrant" -> FFIReentrant
+      | "stdcall" -> FFIStdcall
+      | _ -> failwith (Printf.sprintf "Unknown FFI attribute: %s" s)
+
+    (* Collect types from a typ, flattening arrow types into a list *)
+    let rec collect_ffi_types (t : Ast.typ) : Ast.typ list =
+      match t with
+      | TypFun (arg, ret) -> arg.value :: collect_ffi_types ret.value
+      | other -> [other]
 %}
 
 (* ========================================================================= *)
@@ -114,6 +136,14 @@
 %token<Tokens.ident list> LONG_IDENT
 %token<string> TYVAR
 
+%token<string> SPECIAL
+
+(* FFI keywords *)
+%token FFI_IMPORT "_import"
+%token FFI_EXPORT "_export"
+%token FFI_ADDRESS "_address"
+%token FFI_SYMBOL "_symbol"
+
 %token<string list> EOF
 
 (* ========================================================================= *)
@@ -125,7 +155,8 @@
 %left PROGRAM_SEP
 %left SEMICOLON
 %left JUXTAPOSE
-%right CONS
+(* Operator precedence declarations removed - handled by precedence_resolver *)
+(* %right CONS *)
 %right AND
 %nonassoc BIGARROW
 %left BAR
@@ -137,10 +168,10 @@
 %right ANDALSO
 %right AS
 %right PREFIX_APP
-%left INFIX_APP
+(* %left INFIX_APP *)
 %right ARROW
-%nonassoc EQUAL
-%right STAR
+(* %nonassoc EQUAL *)
+(* %right STAR *)
 %left COLON COLON_GT
 
 %left PROGRAM_PREC 
@@ -213,6 +244,8 @@
 %type <Ast.typ node option> of_typ_opt colon_typ_opt
 %type <int> digit_opt
 %type <Ast.pat node option> as_pat_opt
+%type <Ast.ffi_attr list> ffi_attrs
+%type <Ast.ffi_attr> ffi_attr
 
 %start main
 %start<Ast.prog * string list> main_top
@@ -238,7 +271,7 @@ typ_top:
   | typ EOF { $1 }
 ;
 let boxed(r) := 
-  | v=r; { { value = v; pos=Some ($symbolstartpos , $endpos ) } } 
+  | v=r; { { value = v; pos=Some ($symbolstartpos , $endpos ); comments = [] } } 
 
 %inline ident:
   | SHORT_IDENT { ident_to_idx $1 }
@@ -251,9 +284,15 @@ let boxed(r) :=
   | boxed(EQUAL) { IdxIdx (b "=") }
 ;
 
+%inline infix_ident:
+  | ident { $1 }
+  | SYMBOL_IDENT { ident_to_idx $1 }
+;
+
 %inline op_ident:
   | ident { WithoutOp (b $1) }
   | "op" ident { WithOp (b $2) }
+  | "op" EQUAL { WithOp (b (IdxIdx (b "="))) }
   | CONS { WithoutOp (b (IdxIdx (b "::"))) }
   | SYMBOL_IDENT { WithoutOp (b (ident_to_idx $1)) }
 ;
@@ -312,6 +351,7 @@ eq_ident_seq1:
 any_ident:
   | eq_ident { b($1) }
   | SYMBOL_IDENT { b (ident_to_idx $1) }
+  | CONS { b (IdxIdx (b "::")) }
   ;
 any_ident_seq1:
   | any_ident any_ident_seq1 { $1 :: $2 }
@@ -374,6 +414,7 @@ typ:
   | tuple_typ {
       if List.length $1 = 1 then (List.hd $1).value else TypTuple $1
     }
+  | SPECIAL { TypPrim ($1) }
 ;
 
 tuple_typ:
@@ -418,26 +459,53 @@ comma_typrow_opt:
 (* ========================================================================= *)
 
 expression:
-  | atomic_exp_seq1 {
+  (* Note: "(" expression ")" is handled via atomic_exp -> "(" expression ")"
+     Having it here would cause ambiguity: (fn x => x) 1 wouldn't parse as application *)
+  | exp_item_seq {
       match $1 with
-      | [e] -> e.value
-      | f :: args -> List.fold_left (fun acc arg -> ExpApp (b acc, arg)) f.value args
-      | [] -> failwith "impossible: empty expression sequence"
+      | [single] -> single.value
+      | items -> ExpApp items
     }
-  | expression SYMBOL_IDENT expression %prec INFIX_APP { InfixApp (bp $1 $startpos($1) $endpos($1), b (IdxIdx (b (match $2 with Symbol s -> s | Name s -> s))), bp $3 $startpos($3) $endpos($3)) }
   | expression COLON typ { TypedExp (bp $1 $startpos $endpos, bp $3 $startpos($3) $endpos($3)) }
   | expression "andalso" expression { AndExp (bp $1 $startpos($1) $endpos($1), bp $3 $startpos($3) $endpos($3)) }
   | expression "orelse" expression { OrExp (bp $1 $startpos($1) $endpos($1), bp $3 $startpos($3) $endpos($3)) }
-  | expression CONS expression { InfixApp (bp $1 $startpos($1) $endpos($1), b (IdxIdx (b "::")), bp $3 $startpos($3) $endpos($3)) }
   | e=expression "handle" m=match_clause { HandleExp (bp e $startpos(e) $endpos(e), bp m $startpos(m) $endpos(m)) }
   | "raise" e=expression { RaiseExp (bp e $startpos(e) $endpos(e)) }
   | "if" c=expression "then" t=expression "else" f=expression { IfExp (bp c $startpos(c) $endpos(c), bp t $startpos(t) $endpos(t), bp f $startpos(f) $endpos(f)) }
   | "while" c=expression "do" bdy=expression { WhileExp (bp c $startpos(c) $endpos(c), bp bdy $startpos(bdy) $endpos(bdy)) }
   | "case" e=expression "of" m=match_clause { CaseExp (bp e $startpos(e) $endpos(e), bp m $startpos(m) $endpos(m)) }
   | "fn" m=match_clause { FnExp (bp m $startpos(m) $endpos(m)) }
-  | head=SYMBOL_IDENT arg=expression %prec PREFIX_APP { ExpApp ((bp (ExpIdx (bp (ident_to_idx head) $startpos(head) $endpos(head))) $startpos(head) $endpos(head)), bp arg $startpos(arg) $endpos(arg)) }
+  | SPECIAL { PrimExp ($1) }
+  (* FFI expressions: _import, _export, _address, _symbol *)
+  | "_import" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIImport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_import" STAR ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = "*"; kind = FFIImport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_export" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIExport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_address" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIAddress; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_symbol" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFISymbol; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_symbol" STAR COLON typ SEMICOLON
+      { FfiExp { c_name = "*"; kind = FFISymbol; ty = collect_ffi_types $4; attrs = [] } }
   ;
 
+(* Flat sequence of expression items: values, functions, and operators *)
+exp_item_seq:
+  | atomic_exp exp_item_seq { bp $1 $startpos($1) $endpos($1) :: $2 }
+  | SYMBOL_IDENT exp_item_seq { bp (ExpIdx (bp (ident_to_idx $1) $startpos($1) $endpos($1))) $startpos($1) $endpos($1) :: $2 }
+  | CONS exp_item_seq { bp (ExpIdx (bp (IdxIdx (b "::")) $startpos($1) $endpos($1))) $startpos($1) $endpos($1) :: $2 }
+  | EQUAL exp_item_seq { bp (ExpIdx (bp (IdxIdx (b "=")) $startpos($1) $endpos($1))) $startpos($1) $endpos($1) :: $2 }
+  | STAR exp_item_seq { bp (ExpIdx (bp (IdxIdx (b "*")) $startpos($1) $endpos($1))) $startpos($1) $endpos($1) :: $2 }
+  | atomic_exp { [bp $1 $startpos($1) $endpos($1)] }
+  | SYMBOL_IDENT { [bp (ExpIdx (bp (ident_to_idx $1) $startpos($1) $endpos($1))) $startpos($1) $endpos($1)] }
+  | CONS { [bp (ExpIdx (bp (IdxIdx (b "::")) $startpos($1) $endpos($1))) $startpos($1) $endpos($1)] }
+  | EQUAL { [bp (ExpIdx (bp (IdxIdx (b "=")) $startpos($1) $endpos($1))) $startpos($1) $endpos($1)] }
+  | STAR { [bp (ExpIdx (bp (IdxIdx (b "*")) $startpos($1) $endpos($1))) $startpos($1) $endpos($1)] }
+  ;
+
+(* Old atomic sequence rule - kept for backward compatibility if needed *)
 atomic_exp_seq1:
   | atomic_exp atomic_exp_seq1 %prec JUXTAPOSE { bp $1 $startpos($1) $endpos($1) :: $2 }
   | atomic_exp { [bp $1 $startpos($1) $endpos($1)] }
@@ -510,35 +578,39 @@ match_clause:
 (* ========================================================================= *)
 
 pat:
-  | atomic_pat_seq1 {
+  | pat_item_seq {
       match $1 with
       | [p] -> p.value
-      | op :: args ->
-          List.fold_left (fun acc arg -> PatApp (
-            (match acc with
-             | PatIdx w -> w
-             | PatApp (w, _) -> w
-             | _ -> failwith "invalid pattern application"), arg)) op.value args
-
-      | _ -> failwith "impossible: invalid pattern sequence"
+      | pats -> PatApp pats
     }
   | p0=pat BAR p1=pat {
       PatOr (bp p0 $startpos(p0) $endpos(p0), bp p1 $startpos(p1) $endpos(p1))
     }
-  | pat SYMBOL_IDENT pat %prec INFIX_APP { PatInfix (bp $1 $startpos($1) $endpos($1), b (IdxIdx (b (match $2 with Symbol s -> s | Name s -> s))), bp $3 $startpos($3) $endpos($3)) }
-  
   | pat COLON typ { PatTyp (bp $1 $startpos($1) $endpos($1), bp $3 $startpos($3) $endpos($3)) }
-  | pat CONS pat { PatInfix (bp $1 $startpos($1) $endpos($1), b (IdxIdx (b "::")), bp $3 $startpos($3) $endpos($3)) }
-  
   | pat "as" pat {
       match $1 with
       | PatIdx op -> PatAs (op, None, bp $3 $startpos($3) $endpos($3))
       | PatTyp (p, ty) -> (match p.value with PatIdx op -> PatAs (op, Some ty, bp $3 $startpos($3) $endpos($3)) | _ -> failwith "invalid layered pattern")
       | _ -> failwith "invalid layered pattern"
     }
-    | SYMBOL_IDENT pat %prec PREFIX_APP { PatApp (b (WithoutOp (b (IdxIdx (b (match $1 with Symbol s -> s | Name s -> s))))), bp $2 $startpos($2) $endpos($2)) }
 ;
 
+(* Flat sequence of pattern items: values, constructors, and operators *)
+(* Note: EQUAL is NOT included here because = is not a valid infix operator in SML patterns.
+   The = symbol only appears in patterns within record patterns {a = b}, handled in patrow.
+   Including EQUAL here would cause ambiguity with val pat = exp bindings. *)
+pat_item_seq:
+  | atomic_pat pat_item_seq { bp $1 $startpos($1) $endpos($1) :: $2 }
+  | SYMBOL_IDENT pat_item_seq { bp (PatIdx (b (WithoutOp (b (ident_to_idx $1))))) $startpos($1) $endpos($1) :: $2 }
+  | CONS pat_item_seq { bp (PatIdx (b (WithoutOp (b (IdxIdx (b "::")))))) $startpos($1) $endpos($1) :: $2 }
+  | STAR pat_item_seq { bp (PatIdx (b (WithoutOp (b (IdxIdx (b "*")))))) $startpos($1) $endpos($1) :: $2 }
+  | atomic_pat { [bp $1 $startpos($1) $endpos($1)] }
+  | SYMBOL_IDENT { [bp (PatIdx (b (WithoutOp (b (ident_to_idx $1))))) $startpos($1) $endpos($1)] }
+  | CONS { [bp (PatIdx (b (WithoutOp (b (IdxIdx (b "::")))))) $startpos($1) $endpos($1)] }
+  | STAR { [bp (PatIdx (b (WithoutOp (b (IdxIdx (b "*")))))) $startpos($1) $endpos($1)] }
+;
+
+(* Old atomic sequence rule - kept for backward compatibility if needed *)
 atomic_pat_seq1:
   | atomic_pat atomic_pat_seq1 { bp $1 $startpos($1) $endpos($1) :: $2 }
   | atomic_pat { [bp $1 $startpos($1) $endpos($1)] }
@@ -602,6 +674,7 @@ dec_seq:
   | expression SEMICOLON+ dec_seq { SeqDec [bp (ExpDec (bp $1 $startpos($1) $endpos($1))) $startpos($1) $endpos($1); bp $3 $startpos($3) $endpos($3)] }
   | expression { SeqDec [bp (ExpDec (bp $1 $startpos($1) $endpos($1))) $startpos($1) $endpos($1)] }
   | { SeqDec [] }
+  | SPECIAL { PrimDec ($1) }
 ;
 
 (* Non-empty declaration sequence - requires at least one declaration *)
@@ -676,11 +749,14 @@ funmatch:
   | op_ident atomic_pat_seq1 colon_typ_opt EQUAL expression bar_funmatch_opt {
       FunMatchPrefix (bp $1 $startpos($1) $endpos($1), $2, $3, bp $5 $startpos($5) $endpos($5), $6)
     }
-  | atomic_pat ident atomic_pat colon_typ_opt EQUAL expression bar_funmatch_opt {
+  | atomic_pat infix_ident atomic_pat colon_typ_opt EQUAL expression bar_funmatch_opt {
       FunMatchInfix (bp $1 $startpos($1) $endpos($1), bp $2 $startpos($2) $endpos($2), bp $3 $startpos($3) $endpos($3), $4, bp $6 $startpos($6) $endpos($6), $7)
     }
-  | "(" atomic_pat ident atomic_pat ")" atomic_pat_seq1 colon_typ_opt EQUAL expression bar_funmatch_opt {
+  | "(" atomic_pat infix_ident atomic_pat ")" atomic_pat_seq1 colon_typ_opt EQUAL expression bar_funmatch_opt {
       FunMatchLow (bp $2 $startpos($2) $endpos($2), bp $3 $startpos($3) $endpos($3), bp $4 $startpos($4) $endpos($4), $6, $7, bp $9 $startpos($9) $endpos($9), $10)
+    }
+  | "(" atomic_pat infix_ident atomic_pat ")" colon_typ_opt EQUAL expression bar_funmatch_opt {
+      FunMatchInfix (bp $2 $startpos($2) $endpos($2), bp $3 $startpos($3) $endpos($3), bp $4 $startpos($4) $endpos($4), $6, bp $8 $startpos($8) $endpos($8), $9)
     }
 ;
 
@@ -814,6 +890,7 @@ sig_expr:
   | "sig" "end" { SignSig [] }
   | sigid { SignIdx (bp $1 $startpos($1) $endpos($1)) }
   | sig_expr "where" "type" typrefin { SignWhere (bp $1 $startpos($1) $endpos($1), bp $4 $startpos($4) $endpos($4)) }
+  | sig_expr "where" typrefin { SignWhere (bp $1 $startpos($1) $endpos($1), bp $3 $startpos($3) $endpos($3)) }
   | "functor" "(" modid COLON sig_expr ")" "->" sig_expr {
       let param_spec = bp (SpecStr (bp (StrDesc (bp $3 $startpos($3) $endpos($3), bp $5 $startpos($5) $endpos($5), None)) $startpos($3) $endpos($5))) $startpos $endpos in
       let result_spec = bp (SpecInclude (bp $8 $startpos($8) $endpos($8))) $startpos($8) $endpos($8) in
@@ -834,6 +911,7 @@ typrefin:
 
 and_typrefin_opt:
   | "and" "type" typrefin { Some (bp $3 $startpos($3) $endpos($3)) }
+  | "and" typrefin { Some (bp $2 $startpos($2) $endpos($2)) }
   | { None }
 ;
 
@@ -1026,27 +1104,41 @@ and_fctbind_opt:
 ;
 
 (* ========================================================================= *)
+(* FFI Attributes                                                            *)
+(* ========================================================================= *)
+
+ffi_attrs:
+  | ffi_attr ffi_attrs { $1 :: $2 }
+  | { [] }
+;
+
+ffi_attr:
+  | SHORT_IDENT { ffi_attr_of_string (match $1 with Name s -> s | Symbol s -> s) }
+;
+
+(* ========================================================================= *)
 (* Program (Top-level)                                                       *)
 (* ========================================================================= *)
 
 (* Program that can be empty - used for final position *)
 program:
-  | dec_seq { (ProgDec (bp $1 $startpos($1) $endpos($1))) }
-  | "functor" fctbind { (ProgFun (bp $2 $startpos($2) $endpos($2))) }
-  | "signature" sigbind { (ProgStr (bp $2 $startpos($2) $endpos($2))) }
+  | dec_seq { ProgDec { value = $1; pos = Some ($startpos($1), $endpos($1)); comments = [] } }
+  | "functor" fctbind { ProgFun { value = $2; pos = Some ($startpos($2), $endpos($2)); comments = [] } }
+  | "signature" sigbind { ProgStr { value = $2; pos = Some ($startpos($2), $endpos($2)); comments = [] } }
 ;
 
 (* Non-empty program - must start with a keyword *)
 nonempty_program:
-  | nonempty_dec_seq { (ProgDec (bp $1 $startpos($1) $endpos($1))) }
-  | "functor" fctbind { (ProgFun (bp $2 $startpos($2) $endpos($2))) }
-  | "signature" sigbind { (ProgStr (bp $2 $startpos($2) $endpos($2))) }
+  | nonempty_dec_seq { ProgDec { value = $1; pos = Some ($startpos($1), $endpos($1)); comments = [] } }
+  | "functor" fctbind { ProgFun { value = $2; pos = Some ($startpos($2), $endpos($2)); comments = [] } }
+  | "signature" sigbind { ProgStr { value = $2; pos = Some ($startpos($2), $endpos($2)); comments = [] } }
 ;
 
 (* Program list - allows consecutive programs without semicolons *)
 (* Each non-final program must be non-empty to break the cycle *)
 program_list:
-  | nonempty_program SEMICOLON? program_list %prec PROGRAM_SEP { ProgSeq (b $1, b $3) }
+  | nonempty_program SEMICOLON? program_list %prec PROGRAM_SEP { ProgSeq ({ value = $1; pos = Some ($startpos($1), $endpos($1)); comments = [] },
+                                                                          { value = $3; pos = Some ($startpos($3), $endpos($3)); comments = [] }) }
   (* | nonempty_program program_list { ProgSeq (b $1, b $2) } *)
   | program { $1 }
   ;

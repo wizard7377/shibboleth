@@ -3,10 +3,13 @@
 (** Module type for type processing dependencies *)
 module type TYPE_DEPS = sig
   val labeller : Process_label.process_label
-  val build_longident : string list -> Ppxlib.Longident.t
+
+  val build_longident :
+    ?capitalize_modules:bool -> string list -> Ppxlib.Longident.t
+
   val name_to_string : string list -> string
   val ghost : 'a -> 'a Location.loc
-  val config : Common.options
+  val config : Common.t
 end
 
 (** Module type for type processing interface *)
@@ -15,6 +18,9 @@ module type TYPE_PROCESSOR = sig
 
   val process_object_field_type :
     Ast.typ_row Ast.node -> Parsetree.object_field list
+
+  val process_label_declaration :
+    Ast.typ_row Ast.node -> Parsetree.label_declaration list
 
   val process_type : Ast.typ Ast.node -> Parsetree.core_type
 end

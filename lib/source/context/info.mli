@@ -18,8 +18,11 @@ type t
 
 (** {3 Name store operations} *)
 
-val create : (name * name_info) list -> t
+val empty : t
+(** A shared empty name store. Use this instead of [create []] to avoid
+    allocating a fresh hashtable. Do not mutate this value. *)
 
+val create : (name * name_info) list -> t
 (** Create a new name store from a list of (name, name_info) pairs. *)
 
 val merge : t -> t -> t

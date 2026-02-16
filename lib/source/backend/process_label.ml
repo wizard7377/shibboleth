@@ -50,13 +50,40 @@ let rec get_all_comments (lexbuf : string) : (string * int * int) list =
   in
   List.map process_comment_group comments
 
+module StringSet = Set.Make(String)
+
 class process_label opts lexbuf =
+  let _all_comments = get_all_comments lexbuf in
+  let _comment_positions_by_text =
+    let tbl = Hashtbl.create (List.length _all_comments) in
+    List.iter (fun (text, start, _) ->
+      let existing = Hashtbl.find_opt tbl text |> Option.value ~default:[] in
+      Hashtbl.replace tbl text (start :: existing)
+    ) _all_comments;
+    (* Reverse so positions are in source order *)
+    Hashtbl.iter (fun k v -> Hashtbl.replace tbl k (List.rev v)) tbl;
+    tbl
+  in
   object (self)
-    val options : Common.options = opts
-    val mutable comments : (string * int * int) list = get_all_comments lexbuf
+    val config : Common.t = opts
+    val mutable comments : (string * int * int) list = _all_comments
+
+    (** Read-only copy of all comments for position lookups *)
+    val all_original_comments : (string * int * int) list = _all_comments
+
+    (** Index from comment text to list of start positions (source order) *)
+    val comment_positions_by_text : (string, int list) Hashtbl.t = _comment_positions_by_text
+
+    (** Set of comment texts already emitted, keyed by "text@position" to avoid
+        deduplicating genuinely repeated comments at different positions *)
+    val mutable emitted_comment_keys : StringSet.t = StringSet.empty
 
     val mutable lexbuf : string =
       lexbuf (* TODO Change this so it ignores things already used *)
+
+    (* Comment tracking for error detection *)
+    val mutable total_comments_seen : int = 0
+    val mutable total_comments_emitted : int = 0
 
     (* NEW FIELDS for comment hoisting *)
     val mutable pending_comments : (string * int) list = []
@@ -145,24 +172,67 @@ class process_label opts lexbuf =
       let attr_payload = self#string_to_cite b in
       Builder.attribute ~name:attr_name ~payload:attr_payload
 
+    method private lookup_comment_position (text : string) : int =
+      match Hashtbl.find_opt comment_positions_by_text text with
+      | Some (start :: _) -> start
+      | _ -> 0
+
+    (** Make a dedup key for a comment at a known position *)
+    method private make_dedup_key (text : string) (pos : int) : string =
+      text ^ "@" ^ string_of_int pos
+
+    (** Check if a comment text has already been emitted (by any path).
+        Uses the position index for O(k) lookup where k = occurrences of this text. *)
+    method private is_already_emitted (text : string) : bool =
+      match Hashtbl.find_opt comment_positions_by_text text with
+      | None -> false
+      | Some positions ->
+          List.exists (fun start ->
+            StringSet.mem (self#make_dedup_key text start) emitted_comment_keys
+          ) positions
+
+    (** Mark a comment at a specific position as emitted *)
+    method private mark_emitted_at_pos (text : string) (pos : int) : unit =
+      emitted_comment_keys <- StringSet.add (self#make_dedup_key text pos) emitted_comment_keys
+
+    (** Mark a comment by text as emitted (finds first unemitted position) *)
+    method private mark_emitted (text : string) : unit =
+      match Hashtbl.find_opt comment_positions_by_text text with
+      | None -> ()
+      | Some positions ->
+          match List.find_opt (fun start ->
+            not (StringSet.mem (self#make_dedup_key text start) emitted_comment_keys)
+          ) positions with
+          | Some start ->
+              emitted_comment_keys <- StringSet.add (self#make_dedup_key text start) emitted_comment_keys
+          | None -> ()
+
     method cite :
-        'a. 'a citer -> (Lexing.position * Lexing.position) option -> 'a -> 'a =
-      fun tag pos x ->
-        match pos with
-        | None -> x
-        | Some (start_pos, end_pos) -> (
-            let comments = self#retrieve_comments start_pos end_pos in
+        'a. 'a citer -> string list -> 'a -> 'a =
+      fun tag node_comments x ->
+        total_comments_seen <- total_comments_seen + List.length node_comments;
+        (* Count all as emitted (deduped ones were already emitted by leading_comments) *)
+        total_comments_emitted <- total_comments_emitted + List.length node_comments;
+        (* Filter out comments already emitted by leading_comments *)
+        let fresh_comments = List.filter (fun c -> not (self#is_already_emitted c)) node_comments in
+        match fresh_comments with
+        | [] -> x
+        | _ -> (
             match emission_mode with
             | `Immediate ->
-                (* Old behavior: attach as attributes *)
-                let comments' = List.map self#comment_attr comments in
+                (* Attach as attributes directly *)
+                let comments' = List.map (fun c ->
+                  self#mark_emitted c;
+                  self#comment_attr c) fresh_comments in
                 List.fold_left tag x comments'
             | `Accumulate ->
-                (* New behavior: accumulate for later emission *)
+                (* Accumulate for later emission with actual positions *)
                 let with_positions =
-                  List.map (fun c -> (c, start_pos.pos_cnum)) comments
+                  List.map (fun c ->
+                    self#mark_emitted c;
+                    (c, self#lookup_comment_position c)) fresh_comments
                 in
-                pending_comments <- pending_comments @ with_positions;
+                pending_comments <- List.rev_append with_positions pending_comments;
                 x (* Return unchanged *))
 
     method until : Lexing.position -> Attr.attr list =
@@ -201,6 +271,19 @@ class process_label opts lexbuf =
       last_structure_pos <- pos
     (** Update structure boundary marker *)
 
+    (** Save last_structure_pos and set it to a new value.
+        Returns the old value to restore later via [restore_structure_boundary].
+        Use when entering a nested scope (struct/sig body). *)
+    method push_structure_boundary (pos : int) : int =
+      let saved = last_structure_pos in
+      last_structure_pos <- pos;
+      saved
+
+    (** Restore last_structure_pos to a previously saved value.
+        Use when leaving a nested scope. *)
+    method restore_structure_boundary (saved : int) : unit =
+      last_structure_pos <- saved
+
     method leading_comments (pos : Lexing.position option) :
         Parsetree.structure_item list =
       match pos with
@@ -214,6 +297,7 @@ class process_label opts lexbuf =
             last_structure_pos <- end_range;
             List.map
               (fun comment_text ->
+                self#mark_emitted comment_text;
                 let attr = self#comment_attr comment_text in
                 {
                   Parsetree.pstr_desc = Parsetree.Pstr_attribute attr;
@@ -237,6 +321,7 @@ class process_label opts lexbuf =
             last_structure_pos <- end_range;
             List.map
               (fun comment_text ->
+                self#mark_emitted comment_text;
                 let attr = self#comment_attr comment_text in
                 {
                   Parsetree.psig_desc = Parsetree.Psig_attribute attr;
@@ -273,8 +358,69 @@ class process_label opts lexbuf =
             })
           pending
 
+    (** Extract comments from the regex pool that fall within the given AST node
+        position range, and attach them as attributes on the node using the citer.
+        This is the primary mechanism for placing comments on expression/pattern nodes
+        whose .comments field may be empty (because frontend distribution is coarse). *)
+    method cite_for_node :
+        'a. 'a citer ->
+        (Lexing.position * Lexing.position) option ->
+        'a -> 'a =
+      fun tag pos x ->
+        match pos with
+        | None -> x
+        | Some (start_pos, end_pos) ->
+            let within = self#take_within (start_pos.pos_cnum, end_pos.pos_cnum) in
+            match within with
+            | [] -> x
+            | _ ->
+                total_comments_seen <- total_comments_seen + List.length within;
+                total_comments_emitted <- total_comments_emitted + List.length within;
+                let attrs = List.map (fun c ->
+                  self#mark_emitted c;
+                  self#comment_attr c) within in
+                List.fold_left tag x attrs
+
+    method flush_all_remaining_as_structure_items : Parsetree.structure_item list =
+      (* Flush any pending accumulated comments *)
+      let pending = self#emit_pending_as_structure_items () in
+      (* Flush any remaining comments from the regex pool, skipping already-emitted *)
+      let remaining = comments in
+      comments <- [];
+      let fresh_remaining = List.filter
+        (fun (text, _, _) -> not (self#is_already_emitted text))
+        remaining in
+      let remaining_items = List.map
+        (fun (comment_text, _, _) ->
+          self#mark_emitted comment_text;
+          let attr = self#comment_attr comment_text in
+          { Parsetree.pstr_desc = Parsetree.Pstr_attribute attr;
+            Parsetree.pstr_loc = Location.none })
+        fresh_remaining in
+      pending @ remaining_items
+
     method destruct : unit -> bool =
       fun () ->
         let res = comments == [] in
         res
+
+    method comments_to_structure_items (node_comments : string list) : Parsetree.structure_item list =
+      total_comments_seen <- total_comments_seen + List.length node_comments;
+      (* Count all as emitted (deduped ones were already emitted by leading_comments) *)
+      total_comments_emitted <- total_comments_emitted + List.length node_comments;
+      (* Filter out comments already emitted by leading_comments *)
+      let fresh_comments = List.filter (fun c -> not (self#is_already_emitted c)) node_comments in
+      List.map (fun comment_text ->
+        self#mark_emitted comment_text;
+        let attr = self#comment_attr comment_text in
+        { Parsetree.pstr_desc = Parsetree.Pstr_attribute attr;
+          Parsetree.pstr_loc = Location.none }) fresh_comments
+
+    method check_all_comments_emitted : unit =
+      if total_comments_seen > 0 && total_comments_emitted < total_comments_seen then
+        failwith
+          (Printf.sprintf
+             "Comment conversion error: %d comments were seen but only %d were emitted to the output OCaml. %d comment(s) were dropped."
+             total_comments_seen total_comments_emitted
+             (total_comments_seen - total_comments_emitted))
   end

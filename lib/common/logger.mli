@@ -7,18 +7,25 @@ module type LOG = sig
     ?subgroup:string -> ?level:level -> ?kind:kind -> msg:string -> unit -> unit
 
   val log_with :
-    cfg:Options.options ->
+    cfg:Config_lib.t ->
     ?subgroup:string ->
     ?level:level ->
     ?kind:kind ->
     msg:string ->
     unit ->
     unit
+  
+  val log_fmt :
+    ?subgroup:string ->
+    ?level:level ->
+    ?kind:kind ->
+    msg:(unit Fmt.t) ->
+    unit ->
+    unit
 end
 
 module type S = sig
-  include Options.CONFIG
-
+  val config : Config_lib.t
   val group : string
 end
 

@@ -6,8 +6,13 @@
     - Scoped name tracking for let bindings and modules
     - SML basis library constructor mapping (SOME -> Some, etc.)
     
-    Uses {!Capital_utils} for low-level capitalization functions. *)
+    Uses {!Backend_utils} for low-level capitalization functions. *)
 
+include Ast
+let keywords = ["and";"as";"assert";"asr";"begin";"class";"constraint";"do";"done";"downto";"else";"end";"exception";"external";"false";"for";"fun";"function";"functor";"if";"in";"include";"inherit";"initializer";"land";"lazy";"let";"lor";"lsl";"lsr";"lxor";"match";"method";"mod";"module";"mutable";"new";"nonrec";"object";"of";"open";"or";"private";"rec";"sig";"struct";"then";"to";"true";"try";"type";"val";"virtual";"when";"while";"with"]
+module KeywordSet = Set.Make(String)
+let keyword_set = KeywordSet.of_list keywords
+let is_keyword (s : string) : bool = KeywordSet.mem s keyword_set
 type context = ..
 type context += PatternHead
 type context += PatternTail
@@ -40,10 +45,10 @@ open! Ppxlib
 module StringMap = Map.Make(String)
 
 (* Re-export capitalization utilities for convenience *)
-let process_lowercase = Capital_utils.process_lowercase
-let process_uppercase = Capital_utils.process_uppercase
-let process_caps = Capital_utils.process_caps
-let is_lowercase = Capital_utils.is_variable_identifier
+let process_lowercase = Backend_utils.process_lowercase
+let process_uppercase = Backend_utils.process_uppercase
+let process_caps = Backend_utils.process_caps
+let is_lowercase = Backend_utils.is_variable_identifier
 
 type is_constructor = YesItIs of int | NoItsNot
 type note = int
@@ -55,8 +60,9 @@ let get_scope_level (input:string) (name:string option) (scope:string StringMap.
   | None -> StringMap.find_opt input scope
 
 let last (lst:'a list) : 'a =
-  assert (List.length lst > 0);
-  List.nth lst (List.length lst - 1)
+  match List.rev lst with
+  | x :: _ -> x
+  | [] -> failwith "last: empty list"
 
 let rec map_last (f : 'a -> 'a) (lst : 'a list) : 'a list =
   match lst with
@@ -68,22 +74,18 @@ let rec get_in_scope (scope:scope) (name:string) : string option =
   Stack.fold (get_scope_level name) None scope
 
 module Log = Common.Make (struct 
-    let config = Common.mkOptions ()
+    let config = Common.create []
     let group = "process_names"
   end)
-class process_names (config : Common.options ref) (store : Context.t ref) =
+class process_names (config : Common.t ref) (store : Context.t ref) =
   object (self)
     val store : Context.t ref = store
-    val config : Common.options ref = config
+    val config : Common.t ref = config
     val mutable current_depth : int = 0 
     val mutable context_stack : string StringMap.t Stack.t = Stack.create () 
     val mutable global_map : string StringMap.t = StringMap.empty
-    method private guess_matches (n : string) : bool =
-      match Common.get_guess_var !config with
-      | Some pattern ->
-          let regex = Re.Str.regexp pattern in
-          Re.Str.string_match regex n 0
-      | None -> false
+    method private guess_matches (_n : string) : bool =
+      false
     method push_context () : note =
       let depth = current_depth + 1 in
       current_depth <- depth ;
@@ -119,7 +121,7 @@ class process_names (config : Common.options ref) (store : Context.t ref) =
       in
       aux s
     method private is_operator (s : string) : bool =
-      Capital_utils.is_operator_name s
+      Backend_utils.is_operator_name s
     (** Check if a string is an operator (non-alphanumeric identifier) *)
 
     method private build_longident (parts : string list) : Longident.t =
@@ -184,7 +186,12 @@ class process_names (config : Common.options ref) (store : Context.t ref) =
             | '\'' -> Buffer.add_string buf "_prime"
             | _ -> Buffer.add_char buf c)
           s;
-        Buffer.contents buf
+        let result = Buffer.contents buf in
+        if Backend_utils.is_operator_name result
+           && not (Backend_utils.is_valid_ocaml_operator result)
+           && result <> "[]" && result <> "::" && result <> "()"
+        then Backend_utils.operator_to_ident result
+        else result
       in
       let sanitized = List.map sanitize_part name in
       let without_op = map_last (fun s -> self#process_op s) sanitized in 
@@ -194,7 +201,7 @@ class process_names (config : Common.options ref) (store : Context.t ref) =
         | name''' -> name''' in
       let (res, b) =
         (match ctx with
-        | Type when Common.is_flag_enabled (Common.get_rename_types !config) -> (
+        | Type when Common.is_flag_enabled (Common.get (Convert_flag Rename_types) !config) -> (
             let rec process_parts parts =
               match parts with
               | [] -> []
@@ -204,27 +211,17 @@ class process_names (config : Common.options ref) (store : Context.t ref) =
             let new_name = process_parts name' in
             (new_name, true)
           )
-        | Functor when Common.is_flag_enabled (Common.get_make_make_functor !config) -> (
-            let rec process_parts parts =
-              match parts with
-              | [] -> []
-              | [ last ] -> [ "Make_" ^ last ]
-              | first :: rest -> first :: process_parts rest
-            in
-            let new_name = process_parts name' in
-            (new_name, true)
-          )
         | Functor -> (name', false)
-        | PatternHead when Common.is_flag_enabled (Common.get_guess_pattern !config) -> let res = map_last process_uppercase name' in (res, name' <> res)
-        | PatternTail when Common.is_flag_enabled (Common.get_convert_names !config) -> begin match name' with
+        | PatternHead -> let res = map_last process_uppercase name' in (res, name' <> res)
+        | PatternTail when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) -> begin match name' with
             | [ last ] -> let res = process_lowercase last in ( [ res ], last <> res)
             | _ -> (name', false)
           end
-        | Value when Common.is_flag_enabled (Common.get_convert_names !config) -> begin match name' with
+        | Value when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) -> begin match name' with
             | [ last ] -> let res = process_lowercase last in ( [ res ], last <> res)
             | _ -> (name', false)
           end
-        | Constructor when Common.is_flag_enabled (Common.get_convert_names !config) ->
+        | Constructor when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) ->
             (* Map SML basis constructors to OCaml equivalents *)
             let mapped_name = match name' with
               | ["SOME"] -> ["Some"]
@@ -250,7 +247,7 @@ class process_names (config : Common.options ref) (store : Context.t ref) =
         )
           in 
       let (scope, basename) = self#split_name res in
-      let (res0, res1) = (if Ppxlib.Keyword.is_keyword basename && Common.is_flag_enabled (Common.get_convert_keywords !config) then
+      let (res0, res1) = (if (is_keyword) (String.lowercase_ascii basename) && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) !config) then
         let new_basename = basename ^ "_" in
         let full_name = scope @ [ new_basename ] in
         (self#build_longident full_name, b)
@@ -261,4 +258,95 @@ class process_names (config : Common.options ref) (store : Context.t ref) =
       (res0, res1)
     end
 
+(** {1 Name Processor Functor}
 
+    Unified API wrapping process_names with convenience functions. *)
+
+module type CONFIG = sig
+  val config : Common.t
+  val context : Context.t
+end
+
+module Make (Config : CONFIG) = struct
+  let process_special (name : string list) : string list option = 
+    if not @@ Common.engaged @@ Common.get (Convert_flag Toplevel_names) Config.config then
+      None 
+    else 
+      match name with 
+      | [ "true" ] -> Some [ "true" ]
+      | [ "false" ] -> Some [ "false" ]
+      | [ "nil" ] -> Some [ "[]" ]
+      | [ "::" ] -> Some [ "::" ]
+      | [ "SOME" ] -> Some [ "Some" ]
+      | [ "NONE" ] -> Some [ "None" ]
+      | [ "ref" ] -> Some [ "ref" ]
+      | [ "hd" ] -> Some [ "List" ; "hd" ]
+      | _ -> None 
+
+  let namer : process_names =
+    new process_names (ref Config.config) (ref Config.context)
+
+  let in_core_lang (ctx : context) : bool = match ctx with
+    | ModuleValue | ModuleType | Functor -> false
+    | _ -> true
+
+  let build_longident_from_list (parts : string list) : Ppxlib.Longident.t =
+    match parts with
+    | [] -> failwith "empty name"
+    | [ x ] -> Ppxlib.Longident.Lident x
+    | first :: rest ->
+        List.fold_left
+          (fun acc part -> Ppxlib.Longident.Ldot (acc, part))
+          (Ppxlib.Longident.Lident first) rest
+
+  let process_name ~(ctx : context) (name : string list) : Ppxlib.Longident.t * bool =
+    let name = if List.exists (fun s -> String.ends_with s ~suffix:"_") name then List.map (fun s -> s ^ "__") name else name in
+    match process_special name with
+    | Some res -> build_longident_from_list res, true
+    | None -> namer#process_name ~ctx ~name
+
+  let to_string ~(ctx : context) (name_parts : string list) : string =
+    Ppxlib.Longident.last_exn (process_name ~ctx name_parts |> fst)
+
+  let to_longident ~(ctx : context) (name_parts : string list) : Ppxlib.Longident.t =
+    let (res, _changed) = process_name ~ctx name_parts in
+    res
+
+  let idx_to_longident ~(ctx : context) (idx : idx) : Ppxlib.Longident.t =
+    to_longident ~ctx (Backend_utils.idx_to_name idx)
+
+  let idx_to_string ~(ctx : context) (idx : idx) : string =
+    to_string ~ctx (Backend_utils.idx_to_name idx)
+
+  let process_with_op ~(ctx : context) (wo : with_op) : string =
+    match wo with
+    | WithOp id -> idx_to_string ~ctx id.value
+    | WithoutOp id -> idx_to_string ~ctx id.value
+
+  let is_valid ~(ctx : context) (name : string list) : bool =
+    namer#is_good ~ctx ~name
+
+  let push_context () : note = namer#push_context ()
+  let pop_context (n : note) : unit = namer#pop_context n
+
+  let add_name ?(global = false) ~from ~res () : unit =
+    namer#add_name ~global ~from ~res ()
+
+  let get_name (from : string) : string = namer#get_name from
+
+  let matches_pattern (_name : string) : bool =
+    false
+end
+
+(* Context aliases for convenience *)
+let context_value = Value
+let context_type = Type
+let context_constructor = Constructor
+let context_operator = Operator
+let context_label = Label
+let context_module_value = ModuleValue
+let context_module_type = ModuleType
+let context_functor = Functor
+let context_pattern_head = PatternHead
+let context_pattern_tail = PatternTail
+let context_empty = Empty
