@@ -459,7 +459,8 @@ comma_typrow_opt:
 (* ========================================================================= *)
 
 expression:
-  | "(" e=expression ")" { ParenExp (bp e $startpos(e) $endpos(e)) }
+  (* Note: "(" expression ")" is handled via atomic_exp -> "(" expression ")"
+     Having it here would cause ambiguity: (fn x => x) 1 wouldn't parse as application *)
   | exp_item_seq {
       match $1 with
       | [single] -> single.value
@@ -474,6 +475,20 @@ expression:
   | "while" c=expression "do" bdy=expression { WhileExp (bp c $startpos(c) $endpos(c), bp bdy $startpos(bdy) $endpos(bdy)) }
   | "case" e=expression "of" m=match_clause { CaseExp (bp e $startpos(e) $endpos(e), bp m $startpos(m) $endpos(m)) }
   | "fn" m=match_clause { FnExp (bp m $startpos(m) $endpos(m)) }
+  | SPECIAL { PrimExp ($1) }
+  (* FFI expressions: _import, _export, _address, _symbol *)
+  | "_import" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIImport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_import" STAR ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = "*"; kind = FFIImport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_export" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIExport; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_address" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFIAddress; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_symbol" STRING_LIT ffi_attrs COLON typ SEMICOLON
+      { FfiExp { c_name = $2; kind = FFISymbol; ty = collect_ffi_types $5; attrs = $3 } }
+  | "_symbol" STAR COLON typ SEMICOLON
+      { FfiExp { c_name = "*"; kind = FFISymbol; ty = collect_ffi_types $4; attrs = [] } }
   ;
 
 (* Flat sequence of expression items: values, functions, and operators *)
@@ -581,16 +596,17 @@ pat:
 ;
 
 (* Flat sequence of pattern items: values, constructors, and operators *)
+(* Note: EQUAL is NOT included here because = is not a valid infix operator in SML patterns.
+   The = symbol only appears in patterns within record patterns {a = b}, handled in patrow.
+   Including EQUAL here would cause ambiguity with val pat = exp bindings. *)
 pat_item_seq:
   | atomic_pat pat_item_seq { bp $1 $startpos($1) $endpos($1) :: $2 }
   | SYMBOL_IDENT pat_item_seq { bp (PatIdx (b (WithoutOp (b (ident_to_idx $1))))) $startpos($1) $endpos($1) :: $2 }
   | CONS pat_item_seq { bp (PatIdx (b (WithoutOp (b (IdxIdx (b "::")))))) $startpos($1) $endpos($1) :: $2 }
-  | EQUAL pat_item_seq { bp (PatIdx (b (WithoutOp (b (IdxIdx (b "=")))))) $startpos($1) $endpos($1) :: $2 }
   | STAR pat_item_seq { bp (PatIdx (b (WithoutOp (b (IdxIdx (b "*")))))) $startpos($1) $endpos($1) :: $2 }
   | atomic_pat { [bp $1 $startpos($1) $endpos($1)] }
   | SYMBOL_IDENT { [bp (PatIdx (b (WithoutOp (b (ident_to_idx $1))))) $startpos($1) $endpos($1)] }
   | CONS { [bp (PatIdx (b (WithoutOp (b (IdxIdx (b "::")))))) $startpos($1) $endpos($1)] }
-  | EQUAL { [bp (PatIdx (b (WithoutOp (b (IdxIdx (b "=")))))) $startpos($1) $endpos($1)] }
   | STAR { [bp (PatIdx (b (WithoutOp (b (IdxIdx (b "*")))))) $startpos($1) $endpos($1)] }
 ;
 

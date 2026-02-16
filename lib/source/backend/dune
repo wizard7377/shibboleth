@@ -6,11 +6,7 @@
   backend
   backend_sig
   backend_types
-  capital_utils
-  constructor_transform
-  create_ocaml
-  idx_utils
-  name_processor
+  backend_utils
   precedence_resolver
   process_label
   process_names)
