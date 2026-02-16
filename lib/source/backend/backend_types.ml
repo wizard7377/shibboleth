@@ -49,6 +49,8 @@ module Make (Deps : TYPE_DEPS) : TYPE_PROCESSOR = struct
       | TypFun (ty1, ty2) -> make_arrow ty1 ty2
       | TypTuple tys ->
           Builder.ptyp_tuple (List.map (fun t -> process_type_value t) tys)
+      | TypRecord [] ->
+          Builder.ptyp_constr (ghost (Ppxlib.Longident.Lident "unit")) []
       | TypRecord fields ->
           (* Emit a [%record_type ...] extension node.
              The payload encodes the record fields as label declarations

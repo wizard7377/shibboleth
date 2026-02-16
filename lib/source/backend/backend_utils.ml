@@ -108,6 +108,39 @@ let is_operator_name (s : string) : bool =
     let c = String.get s 0 in
     not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_')
 
+(** Check if a string is a valid OCaml operator name.
+    OCaml operator characters: ! $ % & * + - . / : < = > ? @ ^ | ~
+    However, ? alone is reserved for optional labels, and # has special meaning. *)
+let is_valid_ocaml_operator (s : string) : bool =
+  let valid_op_char c =
+    match c with
+    | '!' | '$' | '%' | '&' | '*' | '+' | '-' | '.' | '/'
+    | ':' | '<' | '=' | '>' | '@' | '^' | '|' | '~' -> true
+    | _ -> false
+  in
+  if String.length s = 0 then false
+  else if String.for_all (fun c -> valid_op_char c || c = '?' || c = '#') s then
+    match s.[0] with
+    | '?' | '#' -> false
+    | _ -> true
+  else false
+
+(** Convert a symbolic operator name to a valid OCaml alphanumeric name.
+    Maps each symbolic character to a descriptive fragment. *)
+let operator_to_ident (s : string) : string =
+  let char_to_name c =
+    match c with
+    | '!' -> "bang" | '#' -> "hash" | '$' -> "dollar" | '%' -> "pct"
+    | '&' -> "amp" | '*' -> "star" | '+' -> "plus" | '-' -> "minus"
+    | '.' -> "dot" | '/' -> "slash" | ':' -> "colon" | '<' -> "lt"
+    | '=' -> "eq" | '>' -> "gt" | '?' -> "qmark" | '@' -> "at"
+    | '\\' -> "bslash" | '~' -> "tilde" | '`' -> "bquote"
+    | '^' -> "caret" | '|' -> "pipe"
+    | c -> String.make 1 c
+  in
+  "op_" ^ (String.to_seq s |> Seq.map char_to_name
+           |> List.of_seq |> String.concat "_")
+
 (** {1 Constructor Name Transformation}
 
     Functions for transforming SML constructor names to valid OCaml names.

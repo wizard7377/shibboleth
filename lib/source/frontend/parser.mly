@@ -284,9 +284,15 @@ let boxed(r) :=
   | boxed(EQUAL) { IdxIdx (b "=") }
 ;
 
+%inline infix_ident:
+  | ident { $1 }
+  | SYMBOL_IDENT { ident_to_idx $1 }
+;
+
 %inline op_ident:
   | ident { WithoutOp (b $1) }
   | "op" ident { WithOp (b $2) }
+  | "op" EQUAL { WithOp (b (IdxIdx (b "="))) }
   | CONS { WithoutOp (b (IdxIdx (b "::"))) }
   | SYMBOL_IDENT { WithoutOp (b (ident_to_idx $1)) }
 ;
@@ -345,6 +351,7 @@ eq_ident_seq1:
 any_ident:
   | eq_ident { b($1) }
   | SYMBOL_IDENT { b (ident_to_idx $1) }
+  | CONS { b (IdxIdx (b "::")) }
   ;
 any_ident_seq1:
   | any_ident any_ident_seq1 { $1 :: $2 }
@@ -742,11 +749,14 @@ funmatch:
   | op_ident atomic_pat_seq1 colon_typ_opt EQUAL expression bar_funmatch_opt {
       FunMatchPrefix (bp $1 $startpos($1) $endpos($1), $2, $3, bp $5 $startpos($5) $endpos($5), $6)
     }
-  | atomic_pat ident atomic_pat colon_typ_opt EQUAL expression bar_funmatch_opt {
+  | atomic_pat infix_ident atomic_pat colon_typ_opt EQUAL expression bar_funmatch_opt {
       FunMatchInfix (bp $1 $startpos($1) $endpos($1), bp $2 $startpos($2) $endpos($2), bp $3 $startpos($3) $endpos($3), $4, bp $6 $startpos($6) $endpos($6), $7)
     }
-  | "(" atomic_pat ident atomic_pat ")" atomic_pat_seq1 colon_typ_opt EQUAL expression bar_funmatch_opt {
+  | "(" atomic_pat infix_ident atomic_pat ")" atomic_pat_seq1 colon_typ_opt EQUAL expression bar_funmatch_opt {
       FunMatchLow (bp $2 $startpos($2) $endpos($2), bp $3 $startpos($3) $endpos($3), bp $4 $startpos($4) $endpos($4), $6, $7, bp $9 $startpos($9) $endpos($9), $10)
+    }
+  | "(" atomic_pat infix_ident atomic_pat ")" colon_typ_opt EQUAL expression bar_funmatch_opt {
+      FunMatchInfix (bp $2 $startpos($2) $endpos($2), bp $3 $startpos($3) $endpos($3), bp $4 $startpos($4) $endpos($4), $6, bp $8 $startpos($8) $endpos($8), $9)
     }
 ;
 
@@ -880,6 +890,7 @@ sig_expr:
   | "sig" "end" { SignSig [] }
   | sigid { SignIdx (bp $1 $startpos($1) $endpos($1)) }
   | sig_expr "where" "type" typrefin { SignWhere (bp $1 $startpos($1) $endpos($1), bp $4 $startpos($4) $endpos($4)) }
+  | sig_expr "where" typrefin { SignWhere (bp $1 $startpos($1) $endpos($1), bp $3 $startpos($3) $endpos($3)) }
   | "functor" "(" modid COLON sig_expr ")" "->" sig_expr {
       let param_spec = bp (SpecStr (bp (StrDesc (bp $3 $startpos($3) $endpos($3), bp $5 $startpos($5) $endpos($5), None)) $startpos($3) $endpos($5))) $startpos $endpos in
       let result_spec = bp (SpecInclude (bp $8 $startpos($8) $endpos($8))) $startpos($8) $endpos($8) in
@@ -900,6 +911,7 @@ typrefin:
 
 and_typrefin_opt:
   | "and" "type" typrefin { Some (bp $3 $startpos($3) $endpos($3)) }
+  | "and" typrefin { Some (bp $2 $startpos($2) $endpos($2)) }
   | { None }
 ;
 

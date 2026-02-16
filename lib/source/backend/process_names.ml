@@ -186,7 +186,12 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
             | '\'' -> Buffer.add_string buf "_prime"
             | _ -> Buffer.add_char buf c)
           s;
-        Buffer.contents buf
+        let result = Buffer.contents buf in
+        if Backend_utils.is_operator_name result
+           && not (Backend_utils.is_valid_ocaml_operator result)
+           && result <> "[]" && result <> "::" && result <> "()"
+        then Backend_utils.operator_to_ident result
+        else result
       in
       let sanitized = List.map sanitize_part name in
       let without_op = map_last (fun s -> self#process_op s) sanitized in 

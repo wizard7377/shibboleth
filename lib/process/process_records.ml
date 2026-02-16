@@ -42,6 +42,49 @@ let fresh_name state =
   state.counter <- state.counter + 1;
   Printf.sprintf "__%d" n
 
+module StringSet = Set.Make (String)
+
+(** Collect all type variable names from a core type. *)
+let rec collect_type_vars (acc : StringSet.t) (ct : Parsetree.core_type) :
+    StringSet.t =
+  match ct.ptyp_desc with
+  | Ptyp_var name -> StringSet.add name acc
+  | Ptyp_arrow (_, t1, t2) ->
+      collect_type_vars (collect_type_vars acc t1) t2
+  | Ptyp_tuple ts | Ptyp_constr (_, ts) ->
+      List.fold_left collect_type_vars acc ts
+  | Ptyp_alias (t, _) | Ptyp_poly (_, t) ->
+      collect_type_vars acc t
+  | Ptyp_extension ({ txt = "record_type"; _ }, payload) -> (
+      match extract_record_fields payload with
+      | Some labels ->
+          List.fold_left
+            (fun acc ld -> collect_type_vars acc ld.Parsetree.pld_type)
+            acc labels
+      | None -> acc)
+  | _ -> acc
+
+(** Collect type variables from a list of label declarations, returning
+    a deduplicated list of [(core_type, variance)] pairs suitable for
+    [~params] in a type declaration, plus corresponding [core_type] args. *)
+let collect_label_type_vars (labels : Parsetree.label_declaration list) :
+    (Parsetree.core_type * (Asttypes.variance * Asttypes.injectivity)) list
+    * Parsetree.core_type list =
+  let vars =
+    List.fold_left
+      (fun acc ld -> collect_type_vars acc ld.Parsetree.pld_type)
+      StringSet.empty labels
+  in
+  let sorted = List.sort String.compare (StringSet.elements vars) in
+  let params =
+    List.map
+      (fun v ->
+        (Builder.ptyp_var v, (Asttypes.NoVariance, Asttypes.NoInjectivity)))
+      sorted
+  in
+  let args = List.map (fun v -> Builder.ptyp_var v) sorted in
+  (params, args)
+
 (** Expand [\[%record_type ...\]] in a core type, collecting generated types. *)
 let rec expand_core_type (state : state) (ct : Parsetree.core_type) :
     Parsetree.core_type =
@@ -51,14 +94,15 @@ let rec expand_core_type (state : state) (ct : Parsetree.core_type) :
       | Some labels ->
           let name = fresh_name state in
           let labels' = List.map (expand_label_declaration state) labels in
+          let params, args = collect_label_type_vars labels' in
           let td =
-            Builder.type_declaration ~name:(ghost name) ~params:[] ~cstrs:[]
+            Builder.type_declaration ~name:(ghost name) ~params ~cstrs:[]
               ~kind:(Parsetree.Ptype_record labels')
               ~private_:Asttypes.Public ~manifest:None
           in
           let str_item = Builder.pstr_type Nonrecursive [ td ] in
           state.pending_types <- state.pending_types @ [ str_item ];
-          Builder.ptyp_constr (ghost (Longident.Lident name)) []
+          Builder.ptyp_constr (ghost (Longident.Lident name)) args
       | None -> ct)
   | Ptyp_arrow (lbl, t1, t2) ->
       let t1' = expand_core_type state t1 in

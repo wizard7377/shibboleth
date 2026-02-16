@@ -1,87 +1,17 @@
 (data_only_dirs examples)
 
 (rule
- (alias twelf)
- (deps
-  (source_tree examples/input/theorem-provers/twelf))
-  
- (action
-  (progn
-   (system "rm -rf examples/output")
-   (run %{bin:shibboleth} group
-    --input examples/input/theorem-provers/twelf
+(alias usetest)
+(deps (source_tree examples/input))
+(action (progn
+(system "rm -rf examples/output/%{env:DIR=basis}")
+(system "mkdir -p examples/output/%{env:DIR=basis}")
+(run %{bin:shibboleth} group
+    --input examples/input/%{env:DIR=basis}
     --force
-    --output examples/output/twelf
+    --output examples/output/%{env:DIR=basis}
     --check-ocaml
     --context-output=examples/output/ctx.sctx
     --dash-to-underscore
-    --curry-types=disable))))
-
-(rule
- (alias compilers)
- (deps
-  (source_tree examples/input/compilers))
- (action
-  (progn
-   (system "rm -rf examples/output")
-   (run %{bin:shibboleth} group
-    --input examples/input/compilers
-    --force
-    --output examples/output/compilers
-    --check-ocaml
-    --context-output=examples/output/ctx.sctx
-    --dash-to-underscore
-    --curry-types=disable))))
-(rule
- (alias codebase)
- (deps
-  (source_tree examples/input))
-  
- (action
-  (progn
-   (system "rm -rf examples/output")
-   (run %{bin:shibboleth} group
-    --input examples/input
-    --force
-    --output examples/output
-    --check-ocaml
-    --context-output=examples/output/ctx.sctx
-    --dash-to-underscore
-    --curry-types=disable))))
- (rule 
-  (alias basis)
-  (deps 
-   (source_tree examples/input))
-  (action (progn
-   (system "rm -rf examples/output")
-   (concurrent (echo "HAMLET")
-   (with-accepted-exit-codes (or 0 1)
-    (run %{bin:shibboleth} group
-     --input examples/input/compilers/hamlet/basis
-     --force
-     --output examples/output/hamlet
-     --check-ocaml
-     --context-output=examples/output/ctx.sctx
-     --dash-to-underscore
-     --curry-types=disable))
-    (echo "MLKIT")
-    (with-accepted-exit-codes (or 0 1)
-    (run %{bin:shibboleth} group
-     --input examples/input/compilers/mlkit/basis
-     --force
-     --output examples/output/mlkit
-     --check-ocaml
-     --context-output=examples/output/ctx.sctx
-     --dash-to-underscore
-     --curry-types=disable))
-    (echo "MLTON")
-    (with-accepted-exit-codes (or 0 1)
-    (run %{bin:shibboleth} group
-     --input examples/input/compilers/mlton/basis-library
-     --force
-     --output examples/output/mlton
-     --check-ocaml
-     --context-output=examples/output/ctx.sctx
-     --dash-to-underscore
-     --curry-types=disable))
-    ))))
+    --curry-types=disable)))
+)

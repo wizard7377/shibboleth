@@ -34,11 +34,38 @@ let escaped_char : char Fmt.t =
   Fmt.string f (Char.escaped c);
   Fmt.char f '\''
 
+let contains_substring s sub =
+  let len = String.length s and slen = String.length sub in
+  if slen > len then false
+  else
+    let rec check i =
+      if i > len - slen then false
+      else if String.sub s i slen = sub then true
+      else check (i + 1)
+    in
+    check 0
+
 let escaped_string : string Fmt.t =
  fun f s ->
-  Fmt.char f '"';
-  Fmt.string f (String.escaped s);
-  Fmt.char f '"'
+  let escaped = String.escaped s in
+  if contains_substring escaped "(*"
+     || contains_substring escaped "*)"
+  then begin
+    (* Use quoted string {|...|} to avoid comment delimiter issues.
+       If the string contains |}, use a custom delimiter. *)
+    let delim =
+      if contains_substring escaped "|}" then "s"
+      else ""
+    in
+    Fmt.string f ("{" ^ delim ^ "|");
+    Fmt.string f escaped;
+    Fmt.string f ("|" ^ delim ^ "}")
+  end
+  else begin
+    Fmt.char f '"';
+    Fmt.string f escaped;
+    Fmt.char f '"'
+  end
 
 let constant f = function
   | Pconst_char i -> escaped_char f i

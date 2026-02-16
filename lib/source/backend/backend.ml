@@ -90,6 +90,15 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       then "@" ^ result
       else result
     in
+    (* Convert SML symbolic names that aren't valid OCaml operators,
+       but preserve known OCaml constructors/operators *)
+    let result =
+      if Backend_utils.is_operator_name result
+         && not (Backend_utils.is_valid_ocaml_operator result)
+         && result <> "[]" && result <> "::" && result <> "()"
+      then Backend_utils.operator_to_ident result
+      else result
+    in
     escape_keyword result
 
   (** Capitalize all but the last element in a list (for module path capitalization).
@@ -473,6 +482,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         Builder.pexp_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | TupleExp exps ->
         Builder.pexp_tuple (List.map (fun e -> process_exp e) exps)
+    | RecordExp [] ->
+        Builder.pexp_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | RecordExp rows ->
         let fields =
           List.map
@@ -1099,6 +1110,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     | PatTuple ps -> 
         let pat_list = process_tuple_pat is_arg ps in
         pat_list
+    | PatRecord [] ->
+        Builder.ppat_construct (ghost (Ppxlib.Longident.Lident "()")) None
     | PatRecord rows ->
         let fields =
           List.flatten (List.map (fun r -> process_pat_row r.Ast.value) rows)
@@ -1346,7 +1359,6 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           | FunMatchLow (_, id, _, _, _, _, _) ->
               name_to_string (idx_to_name id.value)
           in
-          (* OCaml requires function names to be lowercase *)
           Backend_utils.transform_to_lowercase raw_name
         in
         Log.log ~subgroup:"function" ~level:Debug ~kind:Neutral

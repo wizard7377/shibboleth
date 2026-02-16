@@ -1,0 +1,3 @@
+[submodule "examples/input"]
+	path = examples/input
+	url = https://github.com/wizard7377/sml-test-inputs.git

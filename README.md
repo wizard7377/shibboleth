@@ -167,9 +167,9 @@ dune build @doc         # Generate API documentation
 
 ### Testing
 
-- **Unit tests** (`test/unit_tests/`): Alcotest tests for individual backend conversion functions
-- **File tests** (`test/file_tests/`): End-to-end tests converting SML files and comparing against expected OCaml output
-- **Precedence tests** (`test/precedence_tests/`): Tests for operator precedence resolution
+```bash
+DIR=DIR_NAME dune build --profile=release --no-buffer @usetest
+```
 
 ## License
 

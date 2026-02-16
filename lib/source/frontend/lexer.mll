@@ -106,8 +106,8 @@ rule token = parse
                    char_lit lexbuf }
 
   (* Hexadecimal integers with optional negation: ~0xhex or 0xhex *)
-  | '~' "0x" hexnum as s { HEX_LIT s }
-  | "0x" hexnum as s     { HEX_LIT s }
+  | '~' "0x" hexnum as s { INT_LIT s }
+  | "0x" hexnum as s     { INT_LIT s }
 
   (* Word literals: 0w for decimal, 0wx for hex *)
   | "0wx" hexnum as s    { HEX_LIT s }

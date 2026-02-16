@@ -51,6 +51,12 @@ val is_variable_identifier : string -> bool
 val is_operator_name : string -> bool
 (** Check if a string is an operator (non-alphanumeric identifier) *)
 
+val is_valid_ocaml_operator : string -> bool
+(** Check if a string is a valid OCaml operator name *)
+
+val operator_to_ident : string -> string
+(** Convert a symbolic operator name to a valid OCaml alphanumeric name *)
+
 (** {1 Constructor Name Transformation} *)
 
 val is_all_uppercase : string -> bool
