@@ -1,5 +1,5 @@
-type level = [`Disable | `Embed | `Enable]
-type mangle = [`MangleOld | `MangleNew | `MangleNone]
+type level = [ `Disable | `Embed | `Enable ]
+type mangle = [ `MangleOld | `MangleNew | `MangleNone ]
 type source = File of string list | StdIn
 type target = FileOut of string | StdOut | Silent
 
@@ -17,30 +17,33 @@ and _ file_flag =
   | Context_output : string option file_flag
   | Context_input : string option file_flag
 
-and _ shell_flag = 
+and _ shell_flag =
   | Force : bool shell_flag
   | Verbosity : int shell_flag
   | Debug : string list shell_flag
   | Quiet : bool shell_flag
 
-and _ convert_flag = 
+and _ convert_flag =
   | Convert_names : level convert_flag
   | Convert_keywords : level convert_flag
   | Rename_types : level convert_flag
   | Curry_expressions : level convert_flag
   | Curry_types : level convert_flag
   | Toplevel_names : level convert_flag
+
 and _ misc_flag =
   | Concat_output : bool misc_flag
   | Check_ocaml : bool misc_flag
   | Dash_to_underscore : bool misc_flag
+
 and _ mangle_flag =
   | Type_mangle : mangle mangle_flag
   | Constructor_mangle : mangle mangle_flag
-  
-and _ dune_flag = 
+
+and _ dune_flag =
   | Dune_enable : bool dune_flag
   | Dune_import : string list dune_flag
-  | Dune_package : string option dune_flag 
+  | Dune_package : string option dune_flag
   | Dune_wrapped : bool dune_flag
-  | Dune_open : string list dune_flag (* Strictly, this isn't specific to dune, but it will likely only see use with libraries *)
+  | Dune_open : string list dune_flag
+(* Strictly, this isn't specific to dune, but it will likely only see use with libraries *)

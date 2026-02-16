@@ -11,8 +11,7 @@ let level_conv : Common.level Cmdliner.Arg.conv =
         Error
           (`Msg
              (Printf.sprintf
-                "Invalid level: %s. Expected one of: enable, embed, disable."
-                s))
+                "Invalid level: %s. Expected one of: enable, embed, disable." s))
   in
   let print fmt v =
     let s =
@@ -21,14 +20,12 @@ let level_conv : Common.level Cmdliner.Arg.conv =
       | `Embed -> "embed"
       | `Disable -> "disable"
     in
-    Format.fprintf fmt "%s" s 
+    Format.fprintf fmt "%s" s
   in
   Arg.conv (parse, print)
 
-let level_arg :
-    Common.level ->
-    Cmdliner.Arg.info ->
-    Common.level Cmdliner.Arg.t =
+let level_arg : Common.level -> Cmdliner.Arg.info -> Common.level Cmdliner.Arg.t
+    =
  fun d info -> Arg.(opt level_conv d) info
 
 let verb : int Term.t =
@@ -40,8 +37,7 @@ let verb : int Term.t =
 
 let conversion_flags : (bool * Common.t) Term.t =
   let convert_names_doc =
-    "Flag identifiers invalid in OCaml with $(b,[@sml.bad_name]) attributes. \
-"
+    "Flag identifiers invalid in OCaml with $(b,[@sml.bad_name]) attributes. "
   in
   let convert_names_flag : Common.level Term.t =
     Arg.value
@@ -49,17 +45,15 @@ let conversion_flags : (bool * Common.t) Term.t =
          (Cmdliner.Arg.info [ "convert-names" ] ~doc:convert_names_doc)
   in
   let convert_keywords_doc =
-    "Rename SML identifiers that clash with OCaml keywords by appending \
-     an underscore (e.g. method -> method_)."
+    "Rename SML identifiers that clash with OCaml keywords by appending an \
+     underscore (e.g. method -> method_)."
   in
   let convert_keywords_flag : Common.level Term.t =
     Arg.value
     @@ level_arg `Embed
          (Cmdliner.Arg.info [ "convert-keywords" ] ~doc:convert_keywords_doc)
   in
-  let rename_types_doc =
-    {|Rename types to be valid OCaml|}
-  in
+  let rename_types_doc = {|Rename types to be valid OCaml|} in
   let rename_types_flag : Common.level Term.t =
     Arg.value
     @@ level_arg `Enable
@@ -84,9 +78,7 @@ let conversion_flags : (bool * Common.t) Term.t =
          (Cmdliner.Arg.info [ "curry-types" ] ~doc:curry_types_doc)
   in
   let convert_force_flag : bool Term.t =
-    let doc =
-      "Force overwrite of existing output files and directories."
-    in
+    let doc = "Force overwrite of existing output files and directories." in
     Arg.(value & flag & info [ "force" ] ~doc)
   in
 
@@ -123,15 +115,11 @@ let concat_output : bool Term.t =
   Arg.(value & opt bool false & info [ "concat-output" ] ~doc)
 
 let quiet : bool Term.t =
-  let doc =
-    {|Suppress all output except errors.|}
-  in
+  let doc = {|Suppress all output except errors.|} in
   Arg.(value & flag & info [ "q"; "quiet" ] ~doc)
 
 let debug : string list Term.t =
-  let doc =
-    {|Enable debug output for specific subsystems.|}
-  in
+  let doc = {|Enable debug output for specific subsystems.|} in
   Arg.(value & opt (list string) [] & info [ "debug" ] ~docv:"CATEGORY" ~doc)
 
 let check_ocaml_doc =
@@ -160,7 +148,6 @@ let context_input_flag : string option Term.t =
     & opt (some string) None
     & info [ "context-input" ] ~doc:context_input_doc ~docv:"PATH")
 
-
 let mangle_conv : Common.mangle Cmdliner.Arg.conv =
   let parse = function
     | "new" -> Ok `MangleOld
@@ -170,8 +157,7 @@ let mangle_conv : Common.mangle Cmdliner.Arg.conv =
         Error
           (`Msg
              (Printf.sprintf
-                "Invalid level: %s. Expected one of: new, old, none."
-                s))
+                "Invalid level: %s. Expected one of: new, old, none." s))
   in
   let print fmt v =
     let s =
@@ -180,28 +166,27 @@ let mangle_conv : Common.mangle Cmdliner.Arg.conv =
       | `MangleNew -> "old"
       | `MangleNone -> "none"
     in
-    Format.fprintf fmt "%s" s 
+    Format.fprintf fmt "%s" s
   in
   Arg.conv (parse, print)
 
 let mangle_arg :
-    Common.mangle ->
-    Cmdliner.Arg.info ->
-    Common.mangle Cmdliner.Arg.t =
+    Common.mangle -> Cmdliner.Arg.info -> Common.mangle Cmdliner.Arg.t =
  fun d info -> Arg.(opt mangle_conv d) info
-
 
 let mangle_types_doc = {|Control how types are mangled|}
 
 let mangle_types_flag : Common.mangle Term.t =
   Arg.value
-  @@ mangle_arg `MangleNew (Cmdliner.Arg.info [ "mangle-types" ] ~doc:mangle_types_doc)
+  @@ mangle_arg `MangleNew
+       (Cmdliner.Arg.info [ "mangle-types" ] ~doc:mangle_types_doc)
 
-let mangle_constructors_doc = {|Control how constructors are mangled|}  
+let mangle_constructors_doc = {|Control how constructors are mangled|}
+
 let mangle_constructors_flag : Common.mangle Term.t =
   Arg.value
-  @@ mangle_arg `MangleNew (Cmdliner.Arg.info [ "mangle-constructors" ] ~doc:mangle_constructors_doc)
-
+  @@ mangle_arg `MangleNew
+       (Cmdliner.Arg.info [ "mangle-constructors" ] ~doc:mangle_constructors_doc)
 
 let dune_enable : bool Term.t =
   let doc = {|Enable generation of Dune files for converted modules|} in
@@ -213,14 +198,17 @@ let dune_import : string list Term.t =
 
 let dune_package : string option Term.t =
   let doc = {|Specify Dune package name for generated Dune files|} in
-  Arg.(value & opt (some string) None & info [ "dune-package" ] ~docv:"PKG" ~doc)
+  Arg.(
+    value & opt (some string) None & info [ "dune-package" ] ~docv:"PKG" ~doc)
 
 let dune_wrapped : bool Term.t =
   let doc = {|Control whether generated Dune files use (wrapped true)|} in
-  Arg.(value & flag & info [ "dune-wrapped" ] ~doc) 
+  Arg.(value & flag & info [ "dune-wrapped" ] ~doc)
+
 let dune_include : string list Term.t =
   let doc = {|Specify modules to open in generated OCaml files|} in
   Arg.(value & opt (list string) [] & info [ "dune-open" ] ~docv:"MODS" ~doc)
+
 let common_options : Common.t Cmdliner.Term.t =
   let+ v = verb
   and+ force, c = conversion_flags
@@ -237,10 +225,14 @@ let common_options : Common.t Cmdliner.Term.t =
     Common.
       [
         set (Shell_flag Verbosity) v;
-        set (Convert_flag Convert_names) (Common.get (Convert_flag Convert_names) c);
-        set (Convert_flag Convert_keywords) (Common.get (Convert_flag Convert_keywords) c);
-        set (Convert_flag Rename_types) (Common.get (Convert_flag Rename_types) c);
-        set (Convert_flag Curry_expressions) (Common.get (Convert_flag Curry_expressions) c);
+        set (Convert_flag Convert_names)
+          (Common.get (Convert_flag Convert_names) c);
+        set (Convert_flag Convert_keywords)
+          (Common.get (Convert_flag Convert_keywords) c);
+        set (Convert_flag Rename_types)
+          (Common.get (Convert_flag Rename_types) c);
+        set (Convert_flag Curry_expressions)
+          (Common.get (Convert_flag Curry_expressions) c);
         set (Convert_flag Curry_types) (Common.get (Convert_flag Curry_types) c);
         set (Misc_flag Concat_output) co;
         set (Shell_flag Force) force;

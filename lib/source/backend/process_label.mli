@@ -7,18 +7,19 @@ val change_name : string -> string -> attr
 val fixed_name : string -> string -> attr
 
 class process_label : Common.t -> string -> object
-  method cite :
-    'a. 'a citer -> string list -> 'a -> 'a
-
+  method cite : 'a. 'a citer -> string list -> 'a -> 'a
   method cite_exact : 'a. 'a citer -> string -> string list -> 'a -> 'a
   method until : Lexing.position -> attr list
   method destruct : unit -> bool
 
-  (** Convert node comments to standalone structure items, tracking them for error detection *)
-  method comments_to_structure_items : string list -> Parsetree.structure_item list
+  method comments_to_structure_items :
+    string list -> Parsetree.structure_item list
+  (** Convert node comments to standalone structure items, tracking them for
+      error detection *)
 
-  (** Check that all comments were emitted. Raises [Failure] if any were seen but not emitted. *)
   method check_all_comments_emitted : unit
+  (** Check that all comments were emitted. Raises [Failure] if any were seen
+      but not emitted. *)
 
   (* NEW METHODS for comment hoisting *)
   method enter_accumulate_context : unit
@@ -30,16 +31,14 @@ class process_label : Common.t -> string -> object
   method emit_pending_as_structure_items : unit -> Parsetree.structure_item list
   method emit_pending_as_signature_items : unit -> Parsetree.signature_item list
 
-  (** Extract comments from the regex pool within an AST node's byte range
-      and attach them as attributes. This is how expression/pattern-level comments
-      get placed close to their original SML position. *)
   method cite_for_node :
-    'a. 'a citer ->
-    (Lexing.position * Lexing.position) option ->
-    'a -> 'a
+    'a. 'a citer -> (Lexing.position * Lexing.position) option -> 'a -> 'a
+  (** Extract comments from the regex pool within an AST node's byte range and
+      attach them as attributes. This is how expression/pattern-level comments
+      get placed close to their original SML position. *)
 
-  (** Flush all remaining comments (pending + regex pool) as structure items *)
   method flush_all_remaining_as_structure_items : Parsetree.structure_item list
+  (** Flush all remaining comments (pending + regex pool) as structure items *)
 
   (* Methods for leading comments at declaration boundaries *)
   method leading_comments :

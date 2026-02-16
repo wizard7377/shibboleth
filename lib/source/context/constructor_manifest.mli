@@ -52,7 +52,9 @@ type module_context = {
   constructors : Constructor_registry.constructor_info list;
 }
 [@@deriving sexp]
+
 type t = module_context list [@@deriving sexp]
+
 val combined_to_sexp : t -> Sexplib0.Sexp.t
 (** Convert a list of module contexts to S-expression. *)
 
@@ -65,8 +67,10 @@ val write_combined_file : string -> t -> unit
 val read_combined_file : string -> t
 (** Read combined module contexts from a file. *)
 
-val (++) : t -> t -> t
-(** Combine two lists of module contexts, merging constructors for the same module. *)
+val ( ++ ) : t -> t -> t
+(** Combine two lists of module contexts, merging constructors for the same
+    module. *)
 
 val concat : t list -> t
-(** Concatenate multiple lists of module contexts, merging constructors for the same module. *)
+(** Concatenate multiple lists of module contexts, merging constructors for the
+    same module. *)

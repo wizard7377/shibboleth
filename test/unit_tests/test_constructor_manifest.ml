@@ -128,9 +128,7 @@ let test_combined_write_and_read () =
   check string "first loaded module path" "mod_a.ml"
     (List.nth loaded 0).Context.Constructor_manifest.module_path;
   check string "first loaded constructor name" "A"
-    (List.nth
-       (List.nth loaded 0).Context.Constructor_manifest.constructors
-       0)
+    (List.nth (List.nth loaded 0).Context.Constructor_manifest.constructors 0)
       .Context.Constructor_registry.name;
   check string "second loaded module path" "mod_b.ml"
     (List.nth loaded 1).Context.Constructor_manifest.module_path
@@ -146,9 +144,7 @@ let () =
               test_write_and_read ((), temp_dir));
         ] );
       ( "combined_sexp",
-        [
-          test_case "combined roundtrip" `Quick test_combined_roundtrip;
-        ] );
+        [ test_case "combined roundtrip" `Quick test_combined_roundtrip ] );
       ( "combined_file",
         [
           test_case "combined write and read" `Quick

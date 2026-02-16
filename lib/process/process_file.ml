@@ -14,8 +14,9 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
     val mutable store = store
     val mutable lexbuf : string = ""
 
-    val mutable last_constructors :
-      Context.Constructor_registry.constructor_info list = []
+    val mutable last_constructors
+        : Context.Constructor_registry.constructor_info list =
+      []
 
     method get_store () : Context.t = store
     method set_store (s : Context.t) = store <- s
@@ -38,7 +39,8 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
       lexbuf <- s;
       Frontend.parse s
 
-    method convert_to_ocaml ?(header : string list = []) (sml : sml_code) : ocaml_code =
+    method convert_to_ocaml ?(header : string list = []) (sml : sml_code) :
+        ocaml_code =
       Log.log_with ~cfg ~level:Low ~kind:Neutral
         ~msg:"Starting conversion from SML to OCaml..." ();
       let ctx = Context.create (Context.Info.create []) in
@@ -56,7 +58,7 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
         let config = self#get_config ()
       end in
       let module Backend = Backend.Make (BackendContext) (BackendConfig) in
-      let raw_ocaml = Backend.process_sml ~header:header ~prog:sml in
+      let raw_ocaml = Backend.process_sml ~header ~prog:sml in
       last_constructors <- last_constructors @ Backend.get_all_constructors ();
       Log.log_with ~cfg ~level:Low ~kind:Neutral
         ~msg:"Expanding record types (process phase)..." ();
@@ -75,7 +77,7 @@ class process_file ?(store = Context.create (Context.Info.create [])) cfg_init =
 
     method process_file ?(header : string list = []) (input : string) : string =
       let sml_code = self#parse_sml input in
-      let ocaml_code = self#convert_to_ocaml ~header:header sml_code in
+      let ocaml_code = self#convert_to_ocaml ~header sml_code in
       let ocaml_output' = self#print_ocaml ocaml_code in
       let ocaml_output = Polish.polish ocaml_output' in
       let checked = Process_common.check_output ocaml_output in

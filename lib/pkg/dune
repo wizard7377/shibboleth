@@ -2,4 +2,4 @@
  (name pkg)
  (public_name shibboleth.pkg)
  (modules pkg cm)
- (libraries ast common containers config_lib fpath)) 
+ (libraries ast common containers config_lib fpath))

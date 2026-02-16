@@ -36,11 +36,17 @@ include Config_lib
 
 (** Logger types - renamed to avoid shadowing Config_lib.level *)
 type log_level = Logger.level = High | Medium | Low | Debug
+
 type kind = Logger.kind = Positive | Negative | Neutral | Warning
 
 module type LOG = sig
-    val log :
-    ?subgroup:string -> ?level:log_level -> ?kind:kind -> msg:string -> unit -> unit
+  val log :
+    ?subgroup:string ->
+    ?level:log_level ->
+    ?kind:kind ->
+    msg:string ->
+    unit ->
+    unit
 
   val log_with :
     cfg:t ->
@@ -50,14 +56,16 @@ module type LOG = sig
     msg:string ->
     unit ->
     unit
+
   val log_fmt :
     ?subgroup:string ->
     ?level:log_level ->
     ?kind:kind ->
-    msg:(unit Fmt.t) ->
+    msg:unit Fmt.t ->
     unit ->
     unit
-    end
+end
+
 (* Override Logger.S and Make to use Common.t (= Config_lib.t) *)
 module type S = sig
   val config : t

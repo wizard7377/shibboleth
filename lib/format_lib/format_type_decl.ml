@@ -9,8 +9,8 @@ open Format_flags
 module Make
     (CT : Format_types.CORE_TYPE)
     (Attrs : Format_types.ATTRS)
-    (ClassT : Format_types.CLASS_TYPE) = struct
-
+    (ClassT : Format_types.CLASS_TYPE) =
+struct
   let rec type_params f = function
     | [] -> ()
     | [ p ] -> (ClassT.type_param ++ Fmt.sp) f p
@@ -157,14 +157,14 @@ module Make
         Attrs.item_attributes f x.ptyext_attributes)
       f ()
 
-  and constructor_decl f (name, vars, args, res, attrs : _ * _ * constructor_arguments * _ * _) =
+  and constructor_decl f
+      ((name, vars, args, res, attrs) : _ * _ * constructor_arguments * _ * _) =
     let name = if name = "::" then "(::)" else name in
     let pp_args f = function
       | Pcstr_tuple [] -> ()
       | Pcstr_tuple l ->
           Fmt.hvbox
-            (list (Fmt.parens CT.core_type)
-               ~sep:(fun f () ->
+            (list (Fmt.parens CT.core_type) ~sep:(fun f () ->
                  Fmt.string f " *";
                  Fmt.sp f ()))
             f l

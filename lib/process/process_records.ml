@@ -1,11 +1,11 @@
 (** Record type expansion pass.
 
-    Walks the OCaml Parsetree looking for [\[%record_type ...\]] extension nodes
+    Walks the OCaml Parsetree looking for [[%record_type ...]] extension nodes
     in type positions. For each one found:
     - Generates a fresh [type __N = \{ fields... \}] type declaration
     - Replaces the extension node with [__N] (a [Ptyp_constr])
-    - The generated type declarations are collected and must be inserted
-      before the structure item that uses them. *)
+    - The generated type declarations are collected and must be inserted before
+      the structure item that uses them. *)
 
 open Ppxlib
 
@@ -15,27 +15,25 @@ end)
 
 let ghost s = { Location.loc = Location.none; txt = s }
 
-(** Extract label declarations from a [\[%record_type ...\]] payload. *)
+(** Extract label declarations from a [[%record_type ...]] payload. *)
 let extract_record_fields (payload : Parsetree.payload) :
     Parsetree.label_declaration list option =
   match payload with
   | PStr
       [
         {
-          pstr_desc =
-            Pstr_type
-              (_, [ { ptype_kind = Ptype_record labels; _ } ]);
+          pstr_desc = Pstr_type (_, [ { ptype_kind = Ptype_record labels; _ } ]);
           _;
         };
       ] ->
       Some labels
   | _ -> None
 
-(** State for the record expansion pass. *)
 type state = {
   mutable counter : int;
   mutable pending_types : Parsetree.structure_item list;
 }
+(** State for the record expansion pass. *)
 
 let fresh_name state =
   let n = state.counter in
@@ -49,12 +47,10 @@ let rec collect_type_vars (acc : StringSet.t) (ct : Parsetree.core_type) :
     StringSet.t =
   match ct.ptyp_desc with
   | Ptyp_var name -> StringSet.add name acc
-  | Ptyp_arrow (_, t1, t2) ->
-      collect_type_vars (collect_type_vars acc t1) t2
+  | Ptyp_arrow (_, t1, t2) -> collect_type_vars (collect_type_vars acc t1) t2
   | Ptyp_tuple ts | Ptyp_constr (_, ts) ->
       List.fold_left collect_type_vars acc ts
-  | Ptyp_alias (t, _) | Ptyp_poly (_, t) ->
-      collect_type_vars acc t
+  | Ptyp_alias (t, _) | Ptyp_poly (_, t) -> collect_type_vars acc t
   | Ptyp_extension ({ txt = "record_type"; _ }, payload) -> (
       match extract_record_fields payload with
       | Some labels ->
@@ -64,9 +60,9 @@ let rec collect_type_vars (acc : StringSet.t) (ct : Parsetree.core_type) :
       | None -> acc)
   | _ -> acc
 
-(** Collect type variables from a list of label declarations, returning
-    a deduplicated list of [(core_type, variance)] pairs suitable for
-    [~params] in a type declaration, plus corresponding [core_type] args. *)
+(** Collect type variables from a list of label declarations, returning a
+    deduplicated list of [(core_type, variance)] pairs suitable for [~params] in
+    a type declaration, plus corresponding [core_type] args. *)
 let collect_label_type_vars (labels : Parsetree.label_declaration list) :
     (Parsetree.core_type * (Asttypes.variance * Asttypes.injectivity)) list
     * Parsetree.core_type list =
@@ -85,7 +81,7 @@ let collect_label_type_vars (labels : Parsetree.label_declaration list) :
   let args = List.map (fun v -> Builder.ptyp_var v) sorted in
   (params, args)
 
-(** Expand [\[%record_type ...\]] in a core type, collecting generated types. *)
+(** Expand [[%record_type ...]] in a core type, collecting generated types. *)
 let rec expand_core_type (state : state) (ct : Parsetree.core_type) :
     Parsetree.core_type =
   match ct.ptyp_desc with
@@ -97,8 +93,8 @@ let rec expand_core_type (state : state) (ct : Parsetree.core_type) :
           let params, args = collect_label_type_vars labels' in
           let td =
             Builder.type_declaration ~name:(ghost name) ~params ~cstrs:[]
-              ~kind:(Parsetree.Ptype_record labels')
-              ~private_:Asttypes.Public ~manifest:None
+              ~kind:(Parsetree.Ptype_record labels') ~private_:Asttypes.Public
+              ~manifest:None
           in
           let str_item = Builder.pstr_type Nonrecursive [ td ] in
           state.pending_types <- state.pending_types @ [ str_item ];
@@ -122,26 +118,26 @@ let rec expand_core_type (state : state) (ct : Parsetree.core_type) :
       { ct with ptyp_desc = Ptyp_poly (vars, t') }
   | _ -> ct
 
-and expand_label_declaration (state : state)
-    (ld : Parsetree.label_declaration) : Parsetree.label_declaration =
+and expand_label_declaration (state : state) (ld : Parsetree.label_declaration)
+    : Parsetree.label_declaration =
   { ld with pld_type = expand_core_type state ld.pld_type }
 
 (** Expand record types in constructor arguments. *)
 let expand_constructor_arguments (state : state)
     (args : Parsetree.constructor_arguments) : Parsetree.constructor_arguments =
   match args with
-  | Pcstr_tuple cts ->
-      Pcstr_tuple (List.map (expand_core_type state) cts)
+  | Pcstr_tuple cts -> Pcstr_tuple (List.map (expand_core_type state) cts)
   | Pcstr_record lds ->
       Pcstr_record (List.map (expand_label_declaration state) lds)
 
 (** Expand record types in a constructor declaration. *)
 let expand_constructor_declaration (state : state)
-    (cd : Parsetree.constructor_declaration) :
-    Parsetree.constructor_declaration =
-  { cd with
+    (cd : Parsetree.constructor_declaration) : Parsetree.constructor_declaration
+    =
+  {
+    cd with
     pcd_args = expand_constructor_arguments state cd.pcd_args;
-    pcd_res = Option.map (expand_core_type state) cd.pcd_res
+    pcd_res = Option.map (expand_core_type state) cd.pcd_res;
   }
 
 (** Expand record types in a type declaration. *)
@@ -158,11 +154,14 @@ let expand_type_declaration (state : state) (td : Parsetree.type_declaration) :
   in
   let manifest = Option.map (expand_core_type state) td.ptype_manifest in
   let params =
-    List.map
-      (fun (ct, v) -> (expand_core_type state ct, v))
-      td.ptype_params
+    List.map (fun (ct, v) -> (expand_core_type state ct, v)) td.ptype_params
   in
-  { td with ptype_kind = kind; ptype_manifest = manifest; ptype_params = params }
+  {
+    td with
+    ptype_kind = kind;
+    ptype_manifest = manifest;
+    ptype_params = params;
+  }
 
 (** Expand record types in an expression. *)
 let rec expand_expression (state : state) (expr : Parsetree.expression) :
@@ -199,7 +198,9 @@ let rec expand_expression (state : state) (expr : Parsetree.expression) :
       { expr with pexp_desc = Pexp_try (e', cases') }
   | Pexp_apply (f, args) ->
       let f' = expand_expression state f in
-      let args' = List.map (fun (lbl, e) -> (lbl, expand_expression state e)) args in
+      let args' =
+        List.map (fun (lbl, e) -> (lbl, expand_expression state e)) args
+      in
       { expr with pexp_desc = Pexp_apply (f', args') }
   | Pexp_tuple es ->
       let es' = List.map (expand_expression state) es in
@@ -208,7 +209,9 @@ let rec expand_expression (state : state) (expr : Parsetree.expression) :
       let eopt' = Option.map (expand_expression state) eopt in
       { expr with pexp_desc = Pexp_construct (lid, eopt') }
   | Pexp_record (fields, eopt) ->
-      let fields' = List.map (fun (lid, e) -> (lid, expand_expression state e)) fields in
+      let fields' =
+        List.map (fun (lid, e) -> (lid, expand_expression state e)) fields
+      in
       let eopt' = Option.map (expand_expression state) eopt in
       { expr with pexp_desc = Pexp_record (fields', eopt') }
   | Pexp_field (e, lid) ->
@@ -229,8 +232,8 @@ let rec expand_expression (state : state) (expr : Parsetree.expression) :
       { expr with pexp_desc = Pexp_sequence (e1', e2') }
   | _ -> expr
 
-and expand_pattern (state : state) (pat : Parsetree.pattern) :
-    Parsetree.pattern =
+and expand_pattern (state : state) (pat : Parsetree.pattern) : Parsetree.pattern
+    =
   match pat.ppat_desc with
   | Ppat_constraint (p, ct) ->
       let ct' = expand_core_type state ct in
@@ -240,9 +243,7 @@ and expand_pattern (state : state) (pat : Parsetree.pattern) :
       let ps' = List.map (expand_pattern state) ps in
       { pat with ppat_desc = Ppat_tuple ps' }
   | Ppat_construct (lid, arg) ->
-      let arg' =
-        Option.map (fun (vs, p) -> (vs, expand_pattern state p)) arg
-      in
+      let arg' = Option.map (fun (vs, p) -> (vs, expand_pattern state p)) arg in
       { pat with ppat_desc = Ppat_construct (lid, arg') }
   | Ppat_or (p1, p2) ->
       let p1' = expand_pattern state p1 in
@@ -254,21 +255,23 @@ and expand_pattern (state : state) (pat : Parsetree.pattern) :
   | _ -> pat
 
 and expand_case (state : state) (c : Parsetree.case) : Parsetree.case =
-  { c with
+  {
+    c with
     pc_lhs = expand_pattern state c.pc_lhs;
     pc_guard = Option.map (expand_expression state) c.pc_guard;
-    pc_rhs = expand_expression state c.pc_rhs
+    pc_rhs = expand_expression state c.pc_rhs;
   }
 
 and expand_value_binding (state : state) (vb : Parsetree.value_binding) :
     Parsetree.value_binding =
-  { vb with
+  {
+    vb with
     pvb_pat = expand_pattern state vb.pvb_pat;
-    pvb_expr = expand_expression state vb.pvb_expr
+    pvb_expr = expand_expression state vb.pvb_expr;
   }
 
-(** Expand record types in a structure item, returning the item
-    plus any generated type declarations that should precede it. *)
+(** Expand record types in a structure item, returning the item plus any
+    generated type declarations that should precede it. *)
 and expand_structure_item (state : state) (si : Parsetree.structure_item) :
     Parsetree.structure_item list =
   state.pending_types <- [];
@@ -296,7 +299,9 @@ and expand_structure_item (state : state) (si : Parsetree.structure_item) :
         let mtd' = expand_module_type_declaration state mtd in
         { si with pstr_desc = Pstr_modtype mtd' }
     | Pstr_include incl ->
-        let incl' = { incl with pincl_mod = expand_module_expr state incl.pincl_mod } in
+        let incl' =
+          { incl with pincl_mod = expand_module_expr state incl.pincl_mod }
+        in
         { si with pstr_desc = Pstr_include incl' }
     | _ -> si
   in
@@ -340,16 +345,15 @@ and expand_structure (state : state) (str : Parsetree.structure) :
     Parsetree.structure =
   List.concat_map (expand_structure_item state) str
 
-(** Convert a generated [Pstr_type] structure item to a [Psig_type]
-    signature item for use in signature contexts. *)
+(** Convert a generated [Pstr_type] structure item to a [Psig_type] signature
+    item for use in signature contexts. *)
 and str_type_to_sig_type (si : Parsetree.structure_item) :
     Parsetree.signature_item =
   match si.pstr_desc with
-  | Pstr_type (rf, tds) ->
-      Builder.psig_type rf tds
+  | Pstr_type (rf, tds) -> Builder.psig_type rf tds
   | _ -> failwith "process_records: expected Pstr_type in pending_types"
 
-(** Expand [\[%record_type ...\]] in a module type. *)
+(** Expand [[%record_type ...]] in a module type. *)
 and expand_module_type (state : state) (mt : Parsetree.module_type) :
     Parsetree.module_type =
   match mt.pmty_desc with
@@ -366,27 +370,26 @@ and expand_module_type (state : state) (mt : Parsetree.module_type) :
       { mt with pmty_desc = Pmty_with (mt'', cstrs') }
   | _ -> mt
 
-(** Expand [\[%record_type ...\]] in a functor parameter. *)
-and expand_functor_parameter (state : state)
-    (fp : Parsetree.functor_parameter) : Parsetree.functor_parameter =
+(** Expand [[%record_type ...]] in a functor parameter. *)
+and expand_functor_parameter (state : state) (fp : Parsetree.functor_parameter)
+    : Parsetree.functor_parameter =
   match fp with
   | Unit -> Unit
   | Named (name, mt) ->
       let mt' = expand_module_type state mt in
       Named (name, mt')
 
-(** Expand [\[%record_type ...\]] in a [with] constraint. *)
-and expand_with_constraint (state : state)
-    (wc : Parsetree.with_constraint) : Parsetree.with_constraint =
+(** Expand [[%record_type ...]] in a [with] constraint. *)
+and expand_with_constraint (state : state) (wc : Parsetree.with_constraint) :
+    Parsetree.with_constraint =
   match wc with
-  | Pwith_type (lid, td) ->
-      Pwith_type (lid, expand_type_declaration state td)
+  | Pwith_type (lid, td) -> Pwith_type (lid, expand_type_declaration state td)
   | Pwith_typesubst (lid, td) ->
       Pwith_typesubst (lid, expand_type_declaration state td)
   | _ -> wc
 
-(** Expand record types in a signature item, returning the item
-    plus any generated type declarations that should precede it. *)
+(** Expand record types in a signature item, returning the item plus any
+    generated type declarations that should precede it. *)
 and expand_signature_item (state : state) (si : Parsetree.signature_item) :
     Parsetree.signature_item list =
   state.pending_types <- [];
@@ -417,7 +420,9 @@ and expand_signature_item (state : state) (si : Parsetree.signature_item) :
         let mtd' = expand_module_type_declaration state mtd in
         { si with psig_desc = Psig_modtypesubst mtd' }
     | Psig_include incl ->
-        let incl' = { incl with pincl_mod = expand_module_type state incl.pincl_mod } in
+        let incl' =
+          { incl with pincl_mod = expand_module_type state incl.pincl_mod }
+        in
         { si with psig_desc = Psig_include incl' }
     | _ -> si
   in
@@ -425,8 +430,8 @@ and expand_signature_item (state : state) (si : Parsetree.signature_item) :
   sig_types @ [ si' ]
 
 (** Expand record types in a value description. *)
-and expand_value_description (state : state)
-    (vd : Parsetree.value_description) : Parsetree.value_description =
+and expand_value_description (state : state) (vd : Parsetree.value_description)
+    : Parsetree.value_description =
   { vd with pval_type = expand_core_type state vd.pval_type }
 
 (** Expand record types in a module declaration. *)
@@ -445,7 +450,7 @@ and expand_signature (state : state) (sg : Parsetree.signature) :
     Parsetree.signature =
   List.concat_map (expand_signature_item state) sg
 
-(** Main entry point: expand all [\[%record_type ...\]] nodes in a list of
+(** Main entry point: expand all [[%record_type ...]] nodes in a list of
     toplevel phrases. *)
 let expand_record_types (phrases : Parsetree.toplevel_phrase list) :
     Parsetree.toplevel_phrase list =

@@ -7,9 +7,7 @@ let ( ++ ) = Fmt.( ++ )
 
 (* ========== Utility Functions ========== *)
 
-let top_sep : _ Fmt.t =
- fun f x -> Fmt.const Fmt.string ";;" f x
-
+let top_sep : _ Fmt.t = fun f x -> Fmt.const Fmt.string ";;" f x
 let use (fmt : 'a -> unit t) : 'a t = fun f x -> fmt x f ()
 let opt_val t ~default = match t with None -> default | Some x -> x
 let sp = Fmt.sp
@@ -70,4 +68,3 @@ let box n (fmt : 'a t) : 'a t = fun f x -> Fmt.box ~indent:n fmt f x
 let hbox (fmt : 'a t) : 'a t = fun f x -> Fmt.hbox fmt f x
 let vbox (fmt : 'a t) : 'a t = fun f x -> Fmt.vbox fmt f x
 let hvbox (fmt : 'a t) : 'a t = fun f x -> Fmt.hvbox fmt f x
-

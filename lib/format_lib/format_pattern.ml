@@ -6,13 +6,11 @@ open Format_ident
 open Format_flags
 open Format_views
 
-module Make
-    (CT : Format_types.CORE_TYPE)
-    (Attrs : Format_types.ATTRS) = struct
-
+module Make (CT : Format_types.CORE_TYPE) (Attrs : Format_types.ATTRS) = struct
   let rec pattern f x =
     if x.ppat_attributes <> [] then
-      (parens (Fmt.using fst (parens pattern) ++ Fmt.using snd Attrs.attributes))
+      (parens
+         (Fmt.using fst (parens pattern) ++ Fmt.using snd Attrs.attributes))
         f
         ({ x with ppat_attributes = [] }, x.ppat_attributes)
     else
@@ -45,7 +43,8 @@ module Make
                   (fun (_, vl, _) -> vl)
                   (parens
                      (kwd "type"
-                     ++ list ~sep:Fmt.sp (fun f x -> Fmt.string f x.Location.txt)))
+                     ++ list ~sep:Fmt.sp (fun f x ->
+                         Fmt.string f x.Location.txt)))
              ++ Fmt.sp
              ++ Fmt.using (fun (_, _, p) -> p) pattern_parens))
             f (li, vl, p)
@@ -71,7 +70,8 @@ module Make
           in
           let suffix = if closed = Asttypes.Closed then "" else ";_" in
           (box 2
-             (braces (Fmt.sp ++ list field ~sep:(semi ++ Fmt.sp) ++ fstr suffix)))
+             (braces
+                (Fmt.sp ++ list field ~sep:(semi ++ Fmt.sp) ++ fstr suffix)))
             f l
       | Ppat_array l -> (box 2 (bracks (list pattern ~sep:semi))) f l
       | Ppat_or (p1, p2) ->

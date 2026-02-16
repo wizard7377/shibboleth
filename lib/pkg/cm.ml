@@ -15,14 +15,16 @@ let is_source path =
 let is_dependency path = Filename.check_suffix path ".cm"
 
 let module_name path =
-  Filename.basename path |> Filename.remove_extension |> Containers.String.replace ~sub:"-" ~by:"_" 
+  Filename.basename path |> Filename.remove_extension
+  |> Containers.String.replace ~sub:"-" ~by:"_"
 
 let library_name path =
   if String.ends_with ~suffix:"sources.cm" path then
-    Filename.dirname path |> Filename.basename |> Containers.String.replace ~sub:"-" ~by:"_" 
+    Filename.dirname path |> Filename.basename
+    |> Containers.String.replace ~sub:"-" ~by:"_"
   else
-    Filename.basename path |> Filename.remove_extension |> Containers.String.replace ~sub:"-" ~by:"_" 
-  
+    Filename.basename path |> Filename.remove_extension
+    |> Containers.String.replace ~sub:"-" ~by:"_"
 
 let parse_group_type word =
   match String.lowercase_ascii word with
@@ -46,8 +48,7 @@ let strip_comments content =
     else if i + 1 < len && content.[i] = '(' && content.[i + 1] = '*' then
       skip_comment (i + 2) (depth + 1)
     else if i + 1 < len && content.[i] = '*' && content.[i + 1] = ')' then
-      if depth = 1 then loop (i + 2)
-      else skip_comment (i + 2) (depth - 1)
+      if depth = 1 then loop (i + 2) else skip_comment (i + 2) (depth - 1)
     else skip_comment (i + 1) depth
   in
   loop 0;
@@ -66,42 +67,55 @@ let parse content =
   match words with
   | [] -> failwith "Empty CM file"
   | first :: rest ->
-    let group_type = parse_group_type first in
-    (* Drop everything until "is" *)
-    let rec skip_to_is = function
-      | [] -> []
-      | word :: rest ->
-        if String.lowercase_ascii word = "is" then rest
-        else skip_to_is rest
-    in
-    let entries = skip_to_is rest in
-    let sources =
-      List.filter is_source entries |> List.map module_name
-    in
-    let dependencies =
-      List.filter is_dependency entries |> List.map library_name
-    in
-    { group_type; sources; dependencies }
+      let group_type = parse_group_type first in
+      (* Drop everything until "is" *)
+      let rec skip_to_is = function
+        | [] -> []
+        | word :: rest ->
+            if String.lowercase_ascii word = "is" then rest else skip_to_is rest
+      in
+      let entries = skip_to_is rest in
+      let sources = List.filter is_source entries |> List.map module_name in
+      let dependencies =
+        List.filter is_dependency entries |> List.map library_name
+      in
+      { group_type; sources; dependencies }
 
-let to_dune ~(cfg:Common.t) ~dir_name t =
-  let pkg_name = if String.trim dir_name = "" then "main" else
-    begin 
-      if (String.for_all (fun (chr : char) -> chr == '_' || chr = '-' || Containers.Char.is_letter_ascii chr || Containers.Char.is_digit_ascii chr) dir_name) && Common.(get @@ Misc_flag Dash_to_underscore) cfg then Containers.String.replace "-" "_" dir_name else dir_name end
+let to_dune ~(cfg : Common.t) ~dir_name t =
+  let pkg_name =
+    if String.trim dir_name = "" then "main"
+    else begin
+      if
+        String.for_all
+          (fun (chr : char) ->
+            chr == '_' || chr = '-'
+            || Containers.Char.is_letter_ascii chr
+            || Containers.Char.is_digit_ascii chr)
+          dir_name
+        && Common.(get @@ Misc_flag Dash_to_underscore) cfg
+      then Containers.String.replace "-" "_" dir_name
+      else dir_name
+    end
   in
   let modules =
     match t.sources with
     | [] -> ""
-    | mods -> " (modules " ^ String.concat " " (Containers.List.uniq ~eq:((=)) mods) ^ ")" 
+    | mods ->
+        " (modules "
+        ^ String.concat " " (Containers.List.uniq ~eq:( = ) mods)
+        ^ ")"
   in
   let libraries =
     match t.dependencies with
     | [] -> ""
-    | libs -> " (libraries " ^ String.concat " " (Containers.List.uniq ~eq:((=)) libs) ^ ")"
+    | libs ->
+        " (libraries "
+        ^ String.concat " " (Containers.List.uniq ~eq:( = ) libs)
+        ^ ")"
   in
   match t.group_type with
   | Library ->
-    Printf.sprintf "(library\n (wrapped false)\n (name %s)%s%s)"
-      dir_name modules libraries
+      Printf.sprintf "(library\n (wrapped false)\n (name %s)%s%s)" dir_name
+        modules libraries
   | Group ->
-    Printf.sprintf "(executable\n (name %s)%s%s)"
-      dir_name modules libraries
+      Printf.sprintf "(executable\n (name %s)%s%s)" dir_name modules libraries

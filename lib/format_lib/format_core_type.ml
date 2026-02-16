@@ -7,34 +7,52 @@ open Format_flags
 open Format_views
 
 module Make (Attrs : Format_types.ATTRS) = struct
-  let rec flat_arrow (typ : core_type) : (core_type * arg_label) list * core_type =
+  let rec flat_arrow (typ : core_type) :
+      (core_type * arg_label) list * core_type =
     match typ.ptyp_desc with
     | Ptyp_arrow (l, ct1, ct2) ->
-        let (args, ret) = flat_arrow ct2 in
+        let args, ret = flat_arrow ct2 in
         ((ct1, l) :: args, ret)
     | _ -> ([], typ)
 
   let rec core_type f x =
     if x.ptyp_attributes <> [] then
-      (parens (Fmt.using fst (parens core_type) ++ Fmt.using snd Attrs.attributes))
+      (parens
+         (Fmt.using fst (parens core_type) ++ Fmt.using snd Attrs.attributes))
         f
         ({ x with ptyp_attributes = [] }, x.ptyp_attributes)
     else
       match x.ptyp_desc with
       | Ptyp_any -> Fmt.string f "_"
       | Ptyp_var s -> tyvar f s
-      | (Ptyp_arrow (_, _, _))  ->
-          let (args, ret) = flat_arrow x in
+      | Ptyp_arrow (_, _, _) ->
+          let args, ret = flat_arrow x in
           assert (args <> []);
-          let tys = List.map (fun (ct, l) f x -> type_with_label f (l, ct)) args in
+          let tys =
+            List.map (fun (ct, l) f x -> type_with_label f (l, ct)) args
+          in
           let ret' = Fmt.const core_type ret in
-          Fmt.parens (Fmt.hvbox (Fmt.concat ~sep:(fun f () -> Fmt.string f " ->"; Fmt.sp f ()) (tys @ [ret']))) f ()
-      | Ptyp_tuple l -> Fmt.hvbox (list core_type ~sep:(fun f () -> Fmt.string f " *"; Fmt.sp f ())) f l
+          Fmt.parens
+            (Fmt.hvbox
+               (Fmt.concat
+                  ~sep:(fun f () ->
+                    Fmt.string f " ->";
+                    Fmt.sp f ())
+                  (tys @ [ ret' ])))
+            f ()
+      | Ptyp_tuple l ->
+          Fmt.hvbox
+            (list core_type ~sep:(fun f () ->
+                 Fmt.string f " *";
+                 Fmt.sp f ()))
+            f l
       | Ptyp_constr (li, l) -> (
           match l with
           | [] -> longident_loc f li
           | [ x ] ->
-              (Fmt.using fst core_type_parens ++ sp ++ Fmt.using snd longident_loc)
+              (Fmt.using fst core_type_parens
+              ++ sp
+              ++ Fmt.using snd longident_loc)
                 f (x, li)
           | _ ->
               (Fmt.using fst (parens (list core_type ~sep:comma))
@@ -49,8 +67,12 @@ module Make (Attrs : Format_types.ATTRS) = struct
                    (Fmt.using (fun (s, _, _) -> s) Fmt.string
                    ++ sep ": "
                    ++ (Fmt.parens @@ Fmt.using (fun (_, ct, _) -> ct) core_type)
-                   ++ Fmt.using (fun (_, _, attrs) -> attrs) (fun f attrs ->
-                     if attrs <> [] then (Fmt.sp f (); Attrs.attributes f attrs))))
+                   ++ Fmt.using
+                        (fun (_, _, attrs) -> attrs)
+                        (fun f attrs ->
+                          if attrs <> [] then (
+                            Fmt.sp f ();
+                            Attrs.attributes f attrs))))
                   f
                   (l.txt, ct, x.pof_attributes)
             | Oinherit ct -> hvbox core_type f ct
@@ -58,13 +80,19 @@ module Make (Attrs : Format_types.ATTRS) = struct
           let field_var f = function
             | Closed -> ()
             | Open -> (
-                match l with [] -> Fmt.string f ".." | _ -> Fmt.string f " ;..")
+                match l with
+                | [] -> Fmt.string f ".."
+                | _ -> Fmt.string f " ;..")
           in
           hvbox
             (fun f l ->
               Fmt.string f "<";
               Fmt.sp f ();
-              list core_field_type ~sep:(fun f () -> Fmt.string f ";"; Fmt.sp f ()) f l;
+              list core_field_type
+                ~sep:(fun f () ->
+                  Fmt.string f ";";
+                  Fmt.sp f ())
+                f l;
               field_var f o;
               Fmt.sp f ();
               Fmt.string f ">")

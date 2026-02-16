@@ -21,9 +21,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
     val mutable has_errors : bool = false
     val mutable errors_store : (string * string) list = []
     val mutable warning_store : (string * string) list = []
-
-    val mutable accumulated_contexts :
-      Context.Constructor_manifest.t list = []
+    val mutable accumulated_contexts : Context.Constructor_manifest.t list = []
     method set_config c = cfg <- c
     method get_config () = cfg
     method get_store () = store
@@ -262,8 +260,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
           | _ -> file
         in
         accumulated_contexts <-
-          Context.Constructor_manifest.
-            [{ module_path; constructors }]
+          Context.Constructor_manifest.[ { module_path; constructors } ]
           :: accumulated_contexts;
         (* Merge discovered constructors back into the shared store *)
         List.iter

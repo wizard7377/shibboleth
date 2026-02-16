@@ -27,8 +27,9 @@ let merge (t1 : t) (t2 : t) : t =
     merged
   end
 
-module PathSet = Set.Make(struct
+module PathSet = Set.Make (struct
   type t = string list
+
   let compare = compare
 end)
 

@@ -61,7 +61,7 @@ let get : type a. a flag -> t -> a =
   | Dune_flag Dune_enable -> cfg.dune_enable
   | Dune_flag Dune_import -> cfg.dune_import
   | Dune_flag Dune_package -> cfg.dune_package
-  | Dune_flag Dune_wrapped -> cfg.dune_wrapped 
+  | Dune_flag Dune_wrapped -> cfg.dune_wrapped
   | Dune_flag Dune_open -> cfg.dune_open
 
 let set : type a. a flag -> a -> arg =
@@ -89,8 +89,9 @@ let set : type a. a flag -> a -> arg =
   | Dune_flag Dune_enable -> { cfg with dune_enable = value }
   | Dune_flag Dune_import -> { cfg with dune_import = value }
   | Dune_flag Dune_package -> { cfg with dune_package = value }
-  | Dune_flag Dune_wrapped -> { cfg with dune_wrapped = value } 
+  | Dune_flag Dune_wrapped -> { cfg with dune_wrapped = value }
   | Dune_flag Dune_open -> { cfg with dune_open = value }
+
 let create (args : arg list) : t =
   List.fold_left (fun cfg f -> f cfg) (make ()) args
 

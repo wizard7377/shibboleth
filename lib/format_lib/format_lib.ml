@@ -9,15 +9,29 @@ let use = Format_utils.use
 
 (* ========== Tie the Recursive Knot ========== *)
 
-module rec CT        : Format_types.CORE_TYPE   = Format_core_type.Make(Attrs)
-       and Pat       : Format_types.PATTERN     = Format_pattern.Make(CT)(Attrs)
-       and Expr      : Format_types.EXPR        = Format_expression.Make(CT)(Pat)(Attrs)(ClassExpr)(ModExpr)(TypeDecl)
-       and Attrs     : Format_types.ATTRS       = Format_attrs.Make(CT)(Pat)(Expr)(ModType)(ModExpr)(TypeDecl)
-       and ClassT    : Format_types.CLASS_TYPE   = Format_class_type.Make(CT)(Attrs)
-       and ClassExpr : Format_types.CLASS_EXPR   = Format_class_expr.Make(CT)(Pat)(Expr)(Attrs)(ClassT)
-       and ModType   : Format_types.MODULE_TYPE  = Format_module_type.Make(CT)(Attrs)(ClassT)(TypeDecl)(ModExpr)
-       and ModExpr   : Format_types.MODULE_EXPR  = Format_module_expr.Make(CT)(Expr)(Attrs)(ClassT)(ClassExpr)(ModType)(TypeDecl)
-       and TypeDecl  : Format_types.TYPE_DECL    = Format_type_decl.Make(CT)(Attrs)(ClassT)
+module rec CT : Format_types.CORE_TYPE = Format_core_type.Make (Attrs)
+and Pat : Format_types.PATTERN = Format_pattern.Make (CT) (Attrs)
+
+and Expr : Format_types.EXPR =
+  Format_expression.Make (CT) (Pat) (Attrs) (ClassExpr) (ModExpr) (TypeDecl)
+
+and Attrs : Format_types.ATTRS =
+  Format_attrs.Make (CT) (Pat) (Expr) (ModType) (ModExpr) (TypeDecl)
+
+and ClassT : Format_types.CLASS_TYPE = Format_class_type.Make (CT) (Attrs)
+
+and ClassExpr : Format_types.CLASS_EXPR =
+  Format_class_expr.Make (CT) (Pat) (Expr) (Attrs) (ClassT)
+
+and ModType : Format_types.MODULE_TYPE =
+  Format_module_type.Make (CT) (Attrs) (ClassT) (TypeDecl) (ModExpr)
+
+and ModExpr : Format_types.MODULE_EXPR =
+  Format_module_expr.Make (CT) (Expr) (Attrs) (ClassT) (ClassExpr) (ModType)
+    (TypeDecl)
+
+and TypeDecl : Format_types.TYPE_DECL =
+  Format_type_decl.Make (CT) (Attrs) (ClassT)
 
 (* ========== Toplevel Phrases ========== *)
 
@@ -44,7 +58,9 @@ let directive_argument f x =
 
 let toplevel_phrase f = function
   | Astlib.Ast_414.Parsetree.Ptop_def s ->
-      Fmt.vbox ~indent:0 (fun f s -> Format_utils.list ~sep:Fmt.cut ModExpr.structure_item f s) f s
+      Fmt.vbox ~indent:0
+        (fun f s -> Format_utils.list ~sep:Fmt.cut ModExpr.structure_item f s)
+        f s
   | Ptop_dir { pdir_name; pdir_arg; _ } ->
       Format_utils.box 2
         (fun f () ->

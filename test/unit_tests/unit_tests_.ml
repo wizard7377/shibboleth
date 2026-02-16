@@ -10,11 +10,12 @@ module PR = Backend.Precedence_resolver
 (** Test configuration *)
 module TestConfig : Common.CONFIG = struct
   let config =
-    Common.create [
-      Common.set (File_flag Input_file) Common.StdIn;
-      Common.set (File_flag Output_file) Common.Silent;
-      Common.set (Shell_flag Verbosity) 3
-    ]
+    Common.create
+      [
+        Common.set (File_flag Input_file) Common.StdIn;
+        Common.set (File_flag Output_file) Common.Silent;
+        Common.set (Shell_flag Verbosity) 3;
+      ]
 end
 
 module TestContext (* TODO *) = struct
@@ -627,7 +628,6 @@ let test_process_pat_as () =
   check bool "as pattern (layered pattern)" true
     (String.contains result_str 'x')
 *)
-
 
 let test_process_pat_ref () =
   (* Updated for list-based PatApp *)
@@ -1348,7 +1348,9 @@ let test_object_type_structure () =
   match result.ptyp_desc with
   | Ptyp_extension ({ txt = "record_type"; _ }, _) -> ()
   | _ ->
-      fail "Expected [%record_type ...] extension node (SML records become record types)"
+      fail
+        "Expected [%record_type ...] extension node (SML records become record \
+         types)"
 
 (* Test declaration structures *)
 

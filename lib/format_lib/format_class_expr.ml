@@ -10,8 +10,8 @@ module Make
     (Pat : Format_types.PATTERN)
     (Expr : Format_types.EXPR)
     (Attrs : Format_types.ATTRS)
-    (ClassT : Format_types.CLASS_TYPE) = struct
-
+    (ClassT : Format_types.CLASS_TYPE) =
+struct
   let rec class_field f x =
     let attrs = x.pcf_attributes in
     match x.pcf_desc with

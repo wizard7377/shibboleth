@@ -47,8 +47,8 @@ let strip_type_var_prefix (s : string) : string =
     String.sub s 1 (String.length s - 1)
   else s
 
-(** Process a type variable name and return an OCaml type variable.
-    Escapes OCaml keywords (e.g. 'in -> in_, 'out -> out_). *)
+(** Process a type variable name and return an OCaml type variable. Escapes
+    OCaml keywords (e.g. 'in -> in_, 'out -> out_). *)
 let process_type_var_name (s : string) : Parsetree.core_type =
   let stripped = strip_type_var_prefix s in
   let escaped =
@@ -64,11 +64,9 @@ let process_type_params (tvars : Ast.idx Ast.node list) :
       let tv_str = idx_to_string tv.value in
       let var_name = strip_type_var_prefix tv_str in
       let escaped =
-        if Ppxlib.Keyword.is_keyword var_name then var_name ^ "_"
-        else var_name
+        if Ppxlib.Keyword.is_keyword var_name then var_name ^ "_" else var_name
       in
-      ( Builder.ptyp_var escaped,
-        (Asttypes.NoVariance, Asttypes.NoInjectivity) ))
+      (Builder.ptyp_var escaped, (Asttypes.NoVariance, Asttypes.NoInjectivity)))
     tvars
 
 (** {1 Capitalization Utilities}
@@ -114,32 +112,46 @@ let is_operator_name (s : string) : bool =
 let is_valid_ocaml_operator (s : string) : bool =
   let valid_op_char c =
     match c with
-    | '!' | '$' | '%' | '&' | '*' | '+' | '-' | '.' | '/'
-    | ':' | '<' | '=' | '>' | '@' | '^' | '|' | '~' -> true
+    | '!' | '$' | '%' | '&' | '*' | '+' | '-' | '.' | '/' | ':' | '<' | '='
+    | '>' | '@' | '^' | '|' | '~' ->
+        true
     | _ -> false
   in
   if String.length s = 0 then false
   else if String.for_all (fun c -> valid_op_char c || c = '?' || c = '#') s then
-    match s.[0] with
-    | '?' | '#' -> false
-    | _ -> true
+    match s.[0] with '?' | '#' -> false | _ -> true
   else false
 
-(** Convert a symbolic operator name to a valid OCaml alphanumeric name.
-    Maps each symbolic character to a descriptive fragment. *)
+(** Convert a symbolic operator name to a valid OCaml alphanumeric name. Maps
+    each symbolic character to a descriptive fragment. *)
 let operator_to_ident (s : string) : string =
   let char_to_name c =
     match c with
-    | '!' -> "bang" | '#' -> "hash" | '$' -> "dollar" | '%' -> "pct"
-    | '&' -> "amp" | '*' -> "star" | '+' -> "plus" | '-' -> "minus"
-    | '.' -> "dot" | '/' -> "slash" | ':' -> "colon" | '<' -> "lt"
-    | '=' -> "eq" | '>' -> "gt" | '?' -> "qmark" | '@' -> "at"
-    | '\\' -> "bslash" | '~' -> "tilde" | '`' -> "bquote"
-    | '^' -> "caret" | '|' -> "pipe"
+    | '!' -> "bang"
+    | '#' -> "hash"
+    | '$' -> "dollar"
+    | '%' -> "pct"
+    | '&' -> "amp"
+    | '*' -> "star"
+    | '+' -> "plus"
+    | '-' -> "minus"
+    | '.' -> "dot"
+    | '/' -> "slash"
+    | ':' -> "colon"
+    | '<' -> "lt"
+    | '=' -> "eq"
+    | '>' -> "gt"
+    | '?' -> "qmark"
+    | '@' -> "at"
+    | '\\' -> "bslash"
+    | '~' -> "tilde"
+    | '`' -> "bquote"
+    | '^' -> "caret"
+    | '|' -> "pipe"
     | c -> String.make 1 c
   in
-  "op_" ^ (String.to_seq s |> Seq.map char_to_name
-           |> List.of_seq |> String.concat "_")
+  "op_"
+  ^ (String.to_seq s |> Seq.map char_to_name |> List.of_seq |> String.concat "_")
 
 (** {1 Constructor Name Transformation}
 
@@ -163,10 +175,8 @@ let transform_constructor name =
   if String.length name = 0 then name
   else if String.ends_with ~suffix:"_" name then
     let base = String.sub name 0 (String.length name - 1) in
-    if Ppxlib.Keyword.is_keyword base then
-      String.capitalize_ascii base ^ "_"
-    else
-      name ^ "_"
+    if Ppxlib.Keyword.is_keyword base then String.capitalize_ascii base ^ "_"
+    else name ^ "_"
   else if Char.uppercase_ascii name.[0] = name.[0] then
     if is_all_uppercase name && String.length name > 1 then
       String.capitalize_ascii (String.lowercase_ascii name)

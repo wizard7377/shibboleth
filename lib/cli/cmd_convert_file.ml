@@ -19,15 +19,15 @@ module Convert_File : Command_S = struct
 
   let input : string list Term.t =
     let doc =
-      "SML source file(s) to convert. For multi-file modules, \
-       provide in order: %.sig %.fun %.sml."
+      "SML source file(s) to convert. For multi-file modules, provide in \
+       order: %.sig %.fun %.sml."
     in
     Arg.(non_empty (pos_all string [] & info [] ~doc ~docv:"INPUT"))
 
   let run_cmd : int Cmd.t =
     let doc =
-      "Convert one or more Standard ML source files to OCaml. \
-       Inputs are concatenated by default (see --concat-output)."
+      "Convert one or more Standard ML source files to OCaml. Inputs are \
+       concatenated by default (see --concat-output)."
     in
     Cmd.v
       (Cmd.info "file" ~doc ~docs:"SML Converter"
@@ -79,8 +79,8 @@ end
 module Group_Convert : Command_S = struct
   let output_dir : string Term.t =
     let doc =
-      "Output directory for converted OCaml files. \
-       Created if it doesn't exist; use --force to overwrite."
+      "Output directory for converted OCaml files. Created if it doesn't \
+       exist; use --force to overwrite."
     in
     Arg.(
       required
@@ -89,8 +89,8 @@ module Group_Convert : Command_S = struct
 
   let input_dir : string Term.t =
     let doc =
-      "Input directory of SML source files. Recursively discovers \
-       .sml, .sig, and .fun files, grouping related modules."
+      "Input directory of SML source files. Recursively discovers .sml, .sig, \
+       and .fun files, grouping related modules."
     in
     Arg.(
       required
@@ -99,8 +99,8 @@ module Group_Convert : Command_S = struct
 
   let run_cmd : int Cmd.t =
     let doc =
-      "Batch convert a directory of SML files to OCaml. \
-       Preserves directory structure. Use --force to overwrite."
+      "Batch convert a directory of SML files to OCaml. Preserves directory \
+       structure. Use --force to overwrite."
     in
     Cmd.v
       (Cmd.info "group" ~doc ~docs:"SML Converter"

@@ -7,8 +7,8 @@ module type CONTEXT = sig
   val context : Context.t
 end
 
-(** Common exception for AST processing errors *)
 exception BadAst of (Lexing.position * Lexing.position) option * string
+(** Common exception for AST processing errors *)
 
 (** Create a BadAst exception with an optional location *)
 let mkBadAst ?loc (msg : string) : exn = BadAst (loc, msg)

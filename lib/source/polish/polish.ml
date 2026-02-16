@@ -44,8 +44,7 @@ let comment_replace : Re.Group.t -> string =
           (* Node-attached attributes (@ or @@) get a newline prefix so
              they appear on their own line instead of glued to the expression.
              Floating attributes (@@@) already have their own line from Pprintast. *)
-          if ats_len < 3 then "\n" ^ comment
-          else comment
+          if ats_len < 3 then "\n" ^ comment else comment
       | None -> "")
   | None -> ""
 

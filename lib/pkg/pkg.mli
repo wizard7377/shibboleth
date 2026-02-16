@@ -1,5 +1,4 @@
 type system = SMLNJ | MLton
-
-type t 
+type t
 
 module Cm = Cm

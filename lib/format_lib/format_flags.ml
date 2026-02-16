@@ -48,15 +48,10 @@ let contains_substring s sub =
 let escaped_string : string Fmt.t =
  fun f s ->
   let escaped = String.escaped s in
-  if contains_substring escaped "(*"
-     || contains_substring escaped "*)"
-  then begin
+  if contains_substring escaped "(*" || contains_substring escaped "*)" then begin
     (* Use quoted string {|...|} to avoid comment delimiter issues.
        If the string contains |}, use a custom delimiter. *)
-    let delim =
-      if contains_substring escaped "|}" then "s"
-      else ""
-    in
+    let delim = if contains_substring escaped "|}" then "s" else "" in
     Fmt.string f ("{" ^ delim ^ "|");
     Fmt.string f escaped;
     Fmt.string f ("|" ^ delim ^ "}")

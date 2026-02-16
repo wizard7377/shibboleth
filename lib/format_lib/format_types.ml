@@ -6,7 +6,7 @@ open Parsetree
 module type CORE_TYPE = sig
   val core_type : core_type Fmt.t
   val core_type_parens : core_type Fmt.t
-  val type_with_label : Stdlib.Format.formatter -> (arg_label * core_type) -> unit
+  val type_with_label : Stdlib.Format.formatter -> arg_label * core_type -> unit
 end
 
 module type PATTERN = sig

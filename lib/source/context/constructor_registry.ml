@@ -7,7 +7,7 @@ type constructor_info = {
 }
 [@@deriving sexp, eq, ord]
 
-module StringSet = Set.Make(String)
+module StringSet = Set.Make (String)
 
 type t = {
   qualified : (string, constructor_info) Hashtbl.t;
@@ -82,15 +82,15 @@ let open_module registry ~module_path =
           match Hashtbl.find_opt registry.qualified key with
           | None -> ()
           | Some info ->
-              if has_prefix module_path info.path
-                 && List.length info.path > prefix_len
+              if
+                has_prefix module_path info.path
+                && List.length info.path > prefix_len
               then begin
                 let existing =
                   Hashtbl.find_opt registry.unqualified info.name
                   |> Option.value ~default:[]
                 in
-                Hashtbl.replace registry.unqualified info.name
-                  (info :: existing)
+                Hashtbl.replace registry.unqualified info.name (info :: existing)
               end)
         keys
 
@@ -135,35 +135,41 @@ let add_module_alias registry ~alias ~target =
 let merge t1 t2 =
   let len1 = Hashtbl.length t1.qualified in
   let len2 = Hashtbl.length t2.qualified in
-  let merged = {
-    qualified = Hashtbl.create (len1 + len2);
-    unqualified = Hashtbl.create (len1 + len2);
-    by_module = Hashtbl.create (Hashtbl.length t1.by_module + Hashtbl.length t2.by_module);
-  } in
+  let merged =
+    {
+      qualified = Hashtbl.create (len1 + len2);
+      unqualified = Hashtbl.create (len1 + len2);
+      by_module =
+        Hashtbl.create
+          (Hashtbl.length t1.by_module + Hashtbl.length t2.by_module);
+    }
+  in
   (* Copy qualified: t2 overwrites t1 on conflict *)
   Hashtbl.iter (fun k v -> Hashtbl.replace merged.qualified k v) t1.qualified;
   Hashtbl.iter (fun k v -> Hashtbl.replace merged.qualified k v) t2.qualified;
   (* Merge unqualified: concatenate info lists *)
   let merge_unqualified src =
-    Hashtbl.iter (fun name infos ->
-      let existing =
-        Hashtbl.find_opt merged.unqualified name
-        |> Option.value ~default:[]
-      in
-      Hashtbl.replace merged.unqualified name (infos @ existing)
-    ) src.unqualified
+    Hashtbl.iter
+      (fun name infos ->
+        let existing =
+          Hashtbl.find_opt merged.unqualified name |> Option.value ~default:[]
+        in
+        Hashtbl.replace merged.unqualified name (infos @ existing))
+      src.unqualified
   in
   merge_unqualified t1;
   merge_unqualified t2;
   (* Merge by_module: union the sets *)
   let merge_by_module src =
-    Hashtbl.iter (fun mod_name keys ->
-      let existing =
-        Hashtbl.find_opt merged.by_module mod_name
-        |> Option.value ~default:StringSet.empty
-      in
-      Hashtbl.replace merged.by_module mod_name (StringSet.union existing keys)
-    ) src.by_module
+    Hashtbl.iter
+      (fun mod_name keys ->
+        let existing =
+          Hashtbl.find_opt merged.by_module mod_name
+          |> Option.value ~default:StringSet.empty
+        in
+        Hashtbl.replace merged.by_module mod_name
+          (StringSet.union existing keys))
+      src.by_module
   in
   merge_by_module t1;
   merge_by_module t2;

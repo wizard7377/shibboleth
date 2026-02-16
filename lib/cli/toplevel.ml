@@ -14,29 +14,29 @@ let rec styles (s : Fmt.style list) : 'a Fmt.t -> 'a Fmt.t =
 
 let summary : (int * int * int) Fmt.t =
   Fmt.vbox
-  Fmt.(
-       styled `Bold (const string "Conversion Complete:")
-       ++ cut
-       ++ hbox
-            (using
-               (fun (failures, warnings, total) -> total - failures - warnings)
-               (const string "Successes:" ++ sp ++ styles [ `Green; `Bold ] int)
-            ) ++ cut
-       ++ hbox
-            (using
-               (fun (failures, warnings, total) -> warnings)
-               (const string "Warnings:" ++ sp ++ styles [ `Yellow; `Bold ] int)
-            ) ++ cut 
-       ++ hbox
-            (using
-               (fun (failures, warnings, total) -> failures)
-               (const string "Failures:" ++ sp ++ styles [ `Red; `Bold ] int)
-            ) ++ cut
-       ++ hbox
-            (using
-               (fun (failures, warnings, total) -> total)
-               (const string "Total:" ++ sp ++ styles [ `Blue; `Bold ] int)
-            ) ++ cut)
+    Fmt.(
+      styled `Bold (const string "Conversion Complete:")
+      ++ cut
+      ++ hbox
+           (using
+              (fun (failures, warnings, total) -> total - failures - warnings)
+              (const string "Successes:" ++ sp ++ styles [ `Green; `Bold ] int))
+      ++ cut
+      ++ hbox
+           (using
+              (fun (failures, warnings, total) -> warnings)
+              (const string "Warnings:" ++ sp ++ styles [ `Yellow; `Bold ] int))
+      ++ cut
+      ++ hbox
+           (using
+              (fun (failures, warnings, total) -> failures)
+              (const string "Failures:" ++ sp ++ styles [ `Red; `Bold ] int))
+      ++ cut
+      ++ hbox
+           (using
+              (fun (failures, warnings, total) -> total)
+              (const string "Total:" ++ sp ++ styles [ `Blue; `Bold ] int))
+      ++ cut)
 
 let path_to_string (p : path) : string = Fpath.to_string p
 let string_to_path (s : string) : path = Fpath.v s

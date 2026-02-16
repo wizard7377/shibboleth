@@ -13,8 +13,8 @@ module Make
     (ClassT : Format_types.CLASS_TYPE)
     (CE : Format_types.CLASS_EXPR)
     (MT : Format_types.MODULE_TYPE)
-    (TD : Format_types.TYPE_DECL) = struct
-
+    (TD : Format_types.TYPE_DECL) =
+struct
   let rec module_expr f x =
     if x.pmod_attributes <> [] then (
       Fmt.string f "((";
@@ -74,7 +74,8 @@ module Make
       | Pmod_unpack e -> (fstr "(val " ++ Expr.expression ++ fstr ")") f e
       | Pmod_extension e -> Attrs.extension f e
 
-  and structure f x = Fmt.vbox (fun f x -> list ~sep:Fmt.cut structure_item f x) f x
+  and structure f x =
+    Fmt.vbox (fun f x -> list ~sep:Fmt.cut structure_item f x) f x
 
   and structure_item f x =
     begin match x.pstr_desc with
@@ -113,7 +114,8 @@ module Make
             | {
              pmod_desc =
                Pmod_constraint
-                 (me', ({ pmty_desc = Pmty_ident _ | Pmty_signature _; _ } as mt));
+                 ( me',
+                   ({ pmty_desc = Pmty_ident _ | Pmty_signature _; _ } as mt) );
              pmod_attributes = [];
             } ->
                 Fmt.string f " : ";
@@ -141,7 +143,9 @@ module Make
           (fun f () ->
             Fmt.string f "module type ";
             Fmt.string f s.txt;
-            option ~first:(fun f () -> Fmt.string f " = ") MT.module_type f pmtd_type;
+            option
+              ~first:(fun f () -> Fmt.string f " = ")
+              MT.module_type f pmtd_type;
             Attrs.item_attributes f pmtd_attributes)
           f ()
     | Pstr_class l -> (

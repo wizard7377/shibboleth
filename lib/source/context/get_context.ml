@@ -107,7 +107,7 @@ and process_signature ~(path : string list) (sig_node : signature node) : Info.t
       specs
       |> List.fold_left
            (fun acc spec -> Info.merge acc (process_specification ~path spec))
-           (Info.empty)
+           Info.empty
   | SignWhere (sig_inner, _) -> process_signature ~path sig_inner
 
 (** Process a constructor_binding node (for datatypes in declarations) *)
@@ -191,14 +191,14 @@ and process_declaration ~(path : string list) (dec : declaration node) : Info.t
         (decs
         |> List.fold_left
              (fun acc dec -> Info.merge acc (process_declaration ~path dec))
-             (Info.empty))
+             Info.empty)
   | ExnDec _ -> Info.empty
   | StrDec str_bind -> process_structure_binding ~path str_bind
   | SeqDec decs ->
       decs
       |> List.fold_left
            (fun acc dec -> Info.merge acc (process_declaration ~path dec))
-           (Info.empty)
+           Info.empty
   | LocalDec (dec1, dec2) ->
       Info.merge
         (process_declaration ~path dec1)

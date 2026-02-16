@@ -1,7 +1,13 @@
 (library
  (public_name shibboleth.process)
  (name process)
- (modules process process_common process_file process_dir process_group process_records)
+ (modules
+  process
+  process_common
+  process_file
+  process_dir
+  process_group
+  process_records)
  (libraries
   ppx_deriving
   ppxlib

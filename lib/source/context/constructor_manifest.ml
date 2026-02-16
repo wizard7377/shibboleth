@@ -49,11 +49,9 @@ type module_context = {
 [@@deriving sexp]
 
 type t = module_context list [@@deriving sexp]
-let combined_to_sexp (modules : t) : Sexplib0.Sexp.t =
-  sexp_of_t modules
 
-let combined_from_sexp (sexp : Sexplib0.Sexp.t) : t =
-  t_of_sexp sexp
+let combined_to_sexp (modules : t) : Sexplib0.Sexp.t = sexp_of_t modules
+let combined_from_sexp (sexp : Sexplib0.Sexp.t) : t = t_of_sexp sexp
 
 let write_combined_file path modules =
   let sexp = combined_to_sexp modules in
@@ -65,7 +63,7 @@ let write_combined_file path modules =
     close_out oc
   with e ->
     close_out_noerr oc;
-    raise e 
+    raise e
 
 let read_combined_file path =
   let ic = open_in path in
@@ -78,14 +76,15 @@ let read_combined_file path =
     close_in_noerr ic;
     raise e
 
-let simplify (modules : t) : t = 
-  List.map (fun { module_path; constructors } ->
-    let simplified_constructors =
-      List.sort_uniq Constructor_registry.compare_constructor_info constructors
-    in
-    { module_path; constructors = simplified_constructors }) modules
-let (++) (modules1 : t) (modules2 : t) : t =
-  simplify(modules1 @ modules2)
+let simplify (modules : t) : t =
+  List.map
+    (fun { module_path; constructors } ->
+      let simplified_constructors =
+        List.sort_uniq Constructor_registry.compare_constructor_info
+          constructors
+      in
+      { module_path; constructors = simplified_constructors })
+    modules
 
-let concat (module_lists : t list) : t =
-  simplify (List.concat module_lists)
+let ( ++ ) (modules1 : t) (modules2 : t) : t = simplify (modules1 @ modules2)
+let concat (module_lists : t list) : t = simplify (List.concat module_lists)

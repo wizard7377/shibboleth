@@ -6,10 +6,7 @@ open Format_utils
 open Format_ident
 open Format_flags
 
-module Make
-    (CT : Format_types.CORE_TYPE)
-    (Attrs : Format_types.ATTRS) = struct
-
+module Make (CT : Format_types.CORE_TYPE) (Attrs : Format_types.ATTRS) = struct
   let rec class_params_def f = function
     | [] -> ()
     | l -> (brackets (list type_param ~sep:comma) ++ Fmt.sp) f l

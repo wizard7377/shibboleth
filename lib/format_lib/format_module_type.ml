@@ -11,8 +11,8 @@ module Make
     (Attrs : Format_types.ATTRS)
     (ClassT : Format_types.CLASS_TYPE)
     (TD : Format_types.TYPE_DECL)
-    (ME : Format_types.MODULE_EXPR) = struct
-
+    (ME : Format_types.MODULE_EXPR) =
+struct
   let rec module_type f x =
     if x.pmty_attributes <> [] then (
       Fmt.string f "((";
@@ -208,8 +208,10 @@ module Make
                 list ~sep:Fmt.sp (class_desc "and") f xs)
               f (x, xs))
     | Psig_module
-        ({ pmd_type = { pmty_desc = Pmty_alias alias; pmty_attributes = [] }; _ }
-         as pmd) ->
+        ({
+           pmd_type = { pmty_desc = Pmty_alias alias; pmty_attributes = [] };
+           _;
+         } as pmd) ->
         Fmt.hvbox
           (fun f () ->
             Fmt.string f "module ";
@@ -257,10 +259,13 @@ module Make
           (fun f () ->
             Fmt.string f "module type ";
             Fmt.string f s.txt;
-            option ~first:(fun f () -> Fmt.string f " = ") module_type f pmtd_type;
+            option
+              ~first:(fun f () -> Fmt.string f " = ")
+              module_type f pmtd_type;
             Attrs.item_attributes f pmtd_attributes)
           f ()
-    | Psig_modtypesubst { pmtd_name = s; pmtd_type = Some mt; pmtd_attributes } ->
+    | Psig_modtypesubst { pmtd_name = s; pmtd_type = Some mt; pmtd_attributes }
+      ->
         box 2
           (fun f () ->
             Fmt.string f "module type ";
