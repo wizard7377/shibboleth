@@ -1,0 +1,20 @@
+(data_only_dirs
+ test1)
+
+(test
+ (name file_tests)
+ (libraries
+  cli
+  alcotest
+  fpath
+  ast
+  backend
+  helpers
+  compiler-libs.common
+  ppxlib
+  process
+  frontend
+  common
+  polish
+  config_lib
+  context))

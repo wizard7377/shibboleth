@@ -238,6 +238,9 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
   (** Convert SML record type rows to OCaml label declarations. Delegated to Backend_types. *)
   let process_label_declaration = Types.process_label_declaration
 
+  let local_structure (s1 : Ppxlib.structure) (s2 : Ppxlib.structure) : Ppxlib.structure = 
+    let oi = Builder.open_infos ~expr:(Builder.pmod_structure s1) ~override:Asttypes.Override in
+    Builder.pstr_open oi :: s2
   (** Wrapper function for {!process_type_value}.
 
       @param ty The SML type to convert
@@ -1733,8 +1736,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         (* Functor applied to anonymous struct *)
         dec_to_structure_items declaration.value
     | LocalDec (declaration, s) ->
-        (* Local declarations in structure *)
-        dec_to_structure_items declaration.value @ process_str s.value
+
+        local_structure (dec_to_structure_items declaration.value) (process_str s.value)
     end in 
     res
   (** Convert SML signature annotation type.
@@ -1785,7 +1788,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         (* Local declarations in structure: let <dec> in <struct> end *)
         (* This doesn't map cleanly to OCaml module expressions *)
         (* For now, combine the declarations with the structure *)
-        let local_items = dec_to_structure_items declaration.value in
+        let local_items = Builder.pmod_structure @@ dec_to_structure_items declaration.value in
         let struct_items =
           match s.value with
           | StructStr d -> dec_to_structure_items d.value
@@ -1799,7 +1802,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                      ~expr:mod_expr);
               ]
         in
-        Builder.pmod_structure (local_items @ struct_items)
+        Builder.pmod_structure (Builder.pstr_open (Builder.open_infos ~expr:local_items ~override:Asttypes.Fresh) :: struct_items)
 
   (** Convert SML structure bindings.
 
@@ -2300,8 +2303,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 let items = dec_to_structure_items d.Ast.value in
                 leading @ node_cmts @ items) decs)
         | LocalDec (d1, d2) ->
-            (* Local declarations - both visible at top level in OCaml *)
-            dec_to_structure_items d1.value @ dec_to_structure_items d2.value
+            local_structure (dec_to_structure_items d1.value) (dec_to_structure_items d2.value)
         | OpenDec ids ->
             List.map
               (fun (id : Ast.idx Ast.node) ->

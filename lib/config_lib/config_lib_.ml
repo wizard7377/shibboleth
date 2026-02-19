@@ -1,7 +1,7 @@
 type level = [ `Disable | `Embed | `Enable ]
 type mangle = [ `MangleOld | `MangleNew | `MangleNone ]
-type source = File of string list | StdIn
-type target = FileOut of string | StdOut | Silent
+type source = File of string list | StdIn | BufferIn of Buffer.t
+type target = FileOut of string | StdOut | Silent | BufferOut of Buffer.t
 
 type _ flag =
   | Misc_flag : 'a misc_flag -> 'a flag

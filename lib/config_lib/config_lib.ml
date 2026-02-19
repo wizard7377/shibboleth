@@ -14,7 +14,7 @@ type t = {
   curry_types : level; [@default `Disable]
   toplevel_names : level; [@default `Enable]
   verbosity : int; [@default 0]
-  concat_output : bool; [@default false]
+  concat_output : bool; [@default true]
   force : bool; [@default false]
   quiet : bool; [@default true]
   debug : string list; [@default []]

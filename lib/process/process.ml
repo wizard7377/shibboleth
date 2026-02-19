@@ -38,6 +38,10 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
           in
           Some path'
       | _ -> None
+    method private get_output_buffer : Buffer.t option =
+      match Common.get (File_flag Output_file) cfg with
+      | BufferOut buf -> Some buf
+      | _ -> None
     (** Convert output file path, applying dash-to-underscore transformation if
         enabled. Returns None if output mode is not FileOut. *)
 
@@ -56,9 +60,13 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
           output_string oc content;
           close_out oc;
           true
-      | None ->
-          print_string content;
-          true
+      | None -> begin 
+          match self#get_output_buffer with
+          | Some buf -> Buffer.add_string buf content; true
+          | None ->
+            print_string content;
+            true
+          end
     (** Write content to the configured output target. Handles file path
         transformations (dash→underscore), directory creation, and different
         output modes (file, stdout, silent). *)
@@ -111,6 +119,12 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
       try
         self#load_input_context;
         match input with
+        | BufferIn buf ->
+            let content = Buffer.contents buf in
+            let ocaml_code, checked = self#run_single_file "<buffer input>" in
+            self#record_check_result "<buffer input>" checked;
+            ignore (self#write_output ocaml_code);
+            if checked = Process_common.Good then 0 else 1
         | File files ->
             total <- List.length files;
             let res = self#run_files files in
@@ -148,7 +162,11 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
             | Ok prev -> prev ^ "\n\n" ^ content
           in
           Bos.OS.File.write path new_content |> ignore
-      | None -> print_string content
+      | None -> match self#get_output_buffer with
+          | Some buf -> Buffer.add_string buf content
+          | None ->
+            print_string content;
+            ()
     (** Append content to output file, or overwrite if file doesn't exist. *)
 
     method private write_error_file (source_file : string) : unit =
