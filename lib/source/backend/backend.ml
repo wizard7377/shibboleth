@@ -1621,11 +1621,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           |> labeller#cite_for_node Helpers.Attr.value_binding fm.pos
         in
 
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_fun_bind r.value
-        in
-        binding :: rest
-  and 
+        binding :: Local.unwrap_rest rest_opt process_fun_bind
+  and
   get_arity (pat : Ast.pat) : int = match pat with
     | PatTuple ps -> List.length ps
     | PatParen p -> get_arity p.value
@@ -1651,10 +1648,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           | Some ty -> Builder.pexp_constraint expression' (process_type ty)
         in
         let here = (pats', exp_with_type) in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_fun_match r.value
-        in
-        here :: rest
+        here :: Local.unwrap_rest rest_opt process_fun_match
     | FunMatchInfix (p1, id, p2, ty_opt, expression, rest_opt) ->
         Log.log ~level:Common.Debug ~kind:Neutral
           ~msg:
@@ -1670,10 +1664,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           | Some ty -> Builder.pexp_constraint expression' (process_type ty)
         in
         let here = (pats', exp_with_type) in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_fun_match r.value
-        in
-        here :: rest
+        here :: Local.unwrap_rest rest_opt process_fun_match
     | FunMatchLow (p1, id, p2, pats, ty_opt, expression, rest_opt) ->
         Log.log ~level:Common.Debug ~kind:Neutral
           ~msg:
@@ -1690,10 +1681,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           | Some ty -> Builder.pexp_constraint expression' (process_type ty)
         in
         let here = (all_pats, exp_with_type) in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_fun_match r.value
-        in
-        here :: rest
+        here :: Local.unwrap_rest rest_opt process_fun_match
 
   (** Convert SML type bindings (type abbreviations).
 
@@ -1716,10 +1704,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                ~kind:Parsetree.Ptype_abstract ~private_:Asttypes.Public
                ~manifest)
         in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_typ_bind r.value
-        in
-        tdecl :: rest
+        tdecl :: Local.unwrap_rest rest_opt process_typ_bind
 
   (** Convert SML datatype bindings to OCaml variant types.
 
@@ -1749,10 +1734,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                ~kind:(Parsetree.Ptype_variant constructors)
                ~private_:Asttypes.Public ~manifest:None)
         in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_dat_bind r.value
-        in
-        tdecl :: rest
+        tdecl :: Local.unwrap_rest rest_opt process_dat_bind
 
   (** Convert SML constructor bindings within a datatype.
 
@@ -1787,12 +1769,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (Builder.constructor_declaration ~name:(ghost transformed_name) ~args
                ~res:None)
         in
-        let rest =
-          match rest_opt with
-          | None -> []
-          | Some rest -> process_con_bind rest.value
-        in
-        cdecl :: rest
+        cdecl :: Local.unwrap_rest rest_opt process_con_bind
 
   (** Convert SML exception bindings.
 
@@ -1821,10 +1798,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (Builder.extension_constructor ~name:(ghost transformed_name)
                ~kind:(Parsetree.Pext_decl ([], args, None)))
         in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_exn_bind r.value
-        in
-        ext_constr :: rest
+        ext_constr :: Local.unwrap_rest rest_opt process_exn_bind
     | ExnBindAlias (id1, id2, rest_opt) ->
         let name1_str =
           Local.get_name id1
@@ -1839,10 +1813,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (Builder.extension_constructor ~name:(ghost name1_str)
                ~kind:(Parsetree.Pext_rebind (ghost longid2)))
         in
-        let rest =
-          match rest_opt with None -> [] | Some r -> process_exn_bind r.value
-        in
-        ext_constr :: rest
+        ext_constr :: Local.unwrap_rest rest_opt process_exn_bind
 
   (** Extract identifier from SML [op] prefix wrapper (literal translation).
 
@@ -2038,12 +2009,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (Builder.module_binding ~name:(ghost (Some name_str))
                    ~expr:module_expr_with_sig)
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_str_bind r.value
-            in
-            binding :: rest)
+            binding :: Local.unwrap_rest rest_opt process_str_bind)
 
   (** {1 Signature Processing}
 
@@ -2232,12 +2198,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (Builder.value_description ~name:(ghost name_str)
                    ~type_:core_type ~prim:[])
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_val_specification r.value
-            in
-            vdesc :: rest)
+            vdesc :: Local.unwrap_rest rest_opt process_val_specification)
 
   (** Convert SML abstract type descriptions.
 
@@ -2259,12 +2220,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                    ~cstrs:[] ~kind:Parsetree.Ptype_abstract
                    ~private_:Asttypes.Public ~manifest:None)
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_typ_specification r.value
-            in
-            tdecl :: rest)
+            tdecl :: Local.unwrap_rest rest_opt process_typ_specification)
 
   (** Convert SML datatype descriptions in signatures.
 
@@ -2287,12 +2243,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                    ~cstrs:[] ~kind:(Parsetree.Ptype_variant constructors)
                    ~private_:Asttypes.Public ~manifest:None)
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_dat_specification r.value
-            in
-            tdecl :: rest)
+            tdecl :: Local.unwrap_rest rest_opt process_dat_specification)
 
   (** Convert SML constructor descriptions in signatures.
 
@@ -2318,12 +2269,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (Builder.constructor_declaration ~name:(ghost name_str) ~args
                    ~res:None)
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_con_specification r.value
-            in
-            cdecl :: rest)
+            cdecl :: Local.unwrap_rest rest_opt process_con_specification)
 
   (** Convert SML exception descriptions in signatures.
 
@@ -2349,12 +2295,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (Builder.extension_constructor ~name:(ghost name_str)
                    ~kind:(Parsetree.Pext_decl ([], args, None)))
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_exn_specification r.value
-            in
-            ext_constr :: rest)
+            ext_constr :: Local.unwrap_rest rest_opt process_exn_specification)
 
   (** Convert SML structure descriptions in signatures.
 
@@ -2375,13 +2316,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (Builder.module_declaration ~name:(ghost (Some name_str))
                    ~type_:module_type)
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_str_specification r.value
-            in
-            mdecl :: rest)
-          in 
+            mdecl :: Local.unwrap_rest rest_opt process_str_specification)
+          in
           res
 
   (** {1 Program Processing}
@@ -2617,12 +2553,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                      ~expr:functor_expr)
               in
 
-              let rest =
-                match rest_opt with
-                | None -> []
-                | Some r -> process_functor_binding r.value
-              in
-              binding :: rest
+              binding :: Local.unwrap_rest rest_opt process_functor_binding
           | FctBindOpen (name, specification, annot_opt, body, rest_opt) ->
               (* Opened functor - parameter specification is directly visible *)
               let fname_str =
@@ -2665,12 +2596,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                      ~expr:functor_expr)
               in
 
-              let rest =
-                match rest_opt with
-                | None -> []
-                | Some r -> process_functor_binding r.value
-              in
-              binding :: rest
+              binding :: Local.unwrap_rest rest_opt process_functor_binding
           | FctGen (idx, annotate, str, rest_opt) ->
               let fname_str =
                 Local.get_name idx
@@ -2714,15 +2640,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                      ~expr:functor_expr)
               in
 
-              let rest =
-                match rest_opt with
-                | None -> []
-                | Some r -> process_functor_binding r.value
-              in
-              binding :: rest
+              binding :: Local.unwrap_rest rest_opt process_functor_binding
         in
         res)
-      in 
+      in
     res
 
   (** Convert SML signature bindings.
@@ -2751,12 +2672,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (Builder.module_type_declaration ~name:(ghost name_str)
                    ~type_:(Some module_type))
             in
-            let rest =
-              match rest_opt with
-              | None -> []
-              | Some r -> process_signature_binding r.value
-            in
-            mtdecl :: rest)
+            mtdecl :: Local.unwrap_rest rest_opt process_signature_binding)
 
   (** Main entry point for converting a complete SML program. Wraps the
       converted structure in a toplevel phrase for output. *)
