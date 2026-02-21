@@ -30,11 +30,13 @@ and _ convert_flag =
   | Curry_expressions : level convert_flag
   | Curry_types : level convert_flag
   | Toplevel_names : level convert_flag
+  | Pattern_guess : level convert_flag
 
 and _ misc_flag =
   | Concat_output : bool misc_flag
   | Check_ocaml : bool misc_flag
   | Dash_to_underscore : bool misc_flag
+  | No_embed_lowercase : bool misc_flag
 
 and _ mangle_flag =
   | Type_mangle : mangle mangle_flag

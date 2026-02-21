@@ -38,6 +38,7 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
           in
           Some path'
       | _ -> None
+
     method private get_output_buffer : Buffer.t option =
       match Common.get (File_flag Output_file) cfg with
       | BufferOut buf -> Some buf
@@ -60,13 +61,15 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
           output_string oc content;
           close_out oc;
           true
-      | None -> begin 
+      | None -> begin
           match self#get_output_buffer with
-          | Some buf -> Buffer.add_string buf content; true
+          | Some buf ->
+              Buffer.add_string buf content;
+              true
           | None ->
-            print_string content;
-            true
-          end
+              print_string content;
+              true
+        end
     (** Write content to the configured output target. Handles file path
         transformations (dash→underscore), directory creation, and different
         output modes (file, stdout, silent). *)
@@ -162,11 +165,12 @@ class process ?(store = Context.create (Context.Info.create [])) cfg_init =
             | Ok prev -> prev ^ "\n\n" ^ content
           in
           Bos.OS.File.write path new_content |> ignore
-      | None -> match self#get_output_buffer with
+      | None -> (
+          match self#get_output_buffer with
           | Some buf -> Buffer.add_string buf content
           | None ->
-            print_string content;
-            ()
+              print_string content;
+              ())
     (** Append content to output file, or overwrite if file doesn't exist. *)
 
     method private write_error_file (source_file : string) : unit =

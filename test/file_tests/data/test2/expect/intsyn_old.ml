@@ -107,18 +107,12 @@ module type INTSYN = sig
     | Delay of exp_ * cnstr_ ref
 
   and conDec_ =
-    | ConDec of (string * mid option * int * status_ * exp_ * uni_)
-      (*  a : K : kind  or            *)
-    | ConDef of (string * mid option * int * exp_ * exp_ * uni_ * ancestor_)
-    (*  d = M : A : type            *)
-    (*  a = A : K : kind  or        *)
-    | AbbrevDef of (string * mid option * int * exp_ * exp_ * uni_)
-      (*  a = A : K : kind  or        *)
-    | BlockDec of (string * mid option * dec_ ctx_ * dec_ list)
-      (*  %block l : SOME G1 PI G2    *)
+    | ConDec of string * mid option * int * status_ * exp_ * uni_
+    | ConDef of string * mid option * int * exp_ * exp_ * uni_ * ancestor_
+    | AbbrevDef of string * mid option * int * exp_ * exp_ * uni_
+    | BlockDec of string * mid option * dec_ ctx_ * dec_ list
     | BlockDef of string * mid option * cid list
-    | SkoDec of (string * mid option * int * exp_ * uni_)
-  (*  sa: K : kind  or            *)
+    | SkoDec of string * mid option * int * exp_ * uni_
 
   and ancestor_ = Anc of cid option * int * cid option
 
@@ -187,10 +181,16 @@ module type INTSYN = sig
   (*  delay cnstr, associating it with all the rigid EVars in U   *)
   (*  Global signature  *)
   (*  Constant declaration        *)
+  (*  a : K : kind  or            *)
   (*  c : A : type                *)
-  (*  Ancestor info for d or a    *)
+  (*  a = A : K : kind  or        *)
   (*  d = M : A : type            *)
+  (*  Ancestor info for d or a    *)
+  (*  a = A : K : kind  or        *)
+  (*  d = M : A : type            *)
+  (*  %block l : SOME G1 PI G2    *)
   (*  %block l = (l1 | ... | ln)  *)
+  (*  sa: K : kind  or            *)
   (*  sc: A : type                *)
   (*  Ancestor of d or a          *)
   (*  head(expand(d)), height, head(expand[height](d))  *)
@@ -492,18 +492,12 @@ end) : INTSYN = struct
     | Delay of exp_ * cnstr_ ref
 
   and conDec_ =
-    | ConDec of (string * mid option * int * status_ * exp_ * uni_)
-      (*  a : K : kind  or            *)
-    | ConDef of (string * mid option * int * exp_ * exp_ * uni_ * ancestor_)
-    (*  d = M : A : type            *)
-    (*  a = A : K : kind  or        *)
-    | AbbrevDef of (string * mid option * int * exp_ * exp_ * uni_)
-      (*  a = A : K : kind  or        *)
-    | BlockDec of (string * mid option * dec_ ctx_ * dec_ list)
-      (*  %block l : SOME G1 PI G2    *)
+    | ConDec of string * mid option * int * status_ * exp_ * uni_
+    | ConDef of string * mid option * int * exp_ * exp_ * uni_ * ancestor_
+    | AbbrevDef of string * mid option * int * exp_ * exp_ * uni_
+    | BlockDec of string * mid option * dec_ ctx_ * dec_ list
     | BlockDef of string * mid option * cid list
-    | SkoDec of (string * mid option * int * exp_ * uni_)
-  (*  sa: K : kind  or            *)
+    | SkoDec of string * mid option * int * exp_ * uni_
 
   and ancestor_ = Anc of cid option * int * cid option
 
@@ -565,10 +559,16 @@ end) : INTSYN = struct
   (*  delay cnstr, associating it with all the rigid EVars in U   *)
   (*  Global signature  *)
   (*  Constant declaration        *)
+  (*  a : K : kind  or            *)
   (*  c : A : type                *)
-  (*  Ancestor info for d or a    *)
+  (*  a = A : K : kind  or        *)
   (*  d = M : A : type            *)
+  (*  Ancestor info for d or a    *)
+  (*  a = A : K : kind  or        *)
+  (*  d = M : A : type            *)
+  (*  %block l : SOME G1 PI G2    *)
   (*  %block l = (l1 | ... | ln)  *)
+  (*  sa: K : kind  or            *)
   (*  sc: A : type                *)
   (*  Ancestor of d or a          *)
   (*  head(expand(d)), height, head(expand[height](d))  *)

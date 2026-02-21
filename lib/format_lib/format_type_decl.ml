@@ -164,7 +164,7 @@ struct
       | Pcstr_tuple [] -> ()
       | Pcstr_tuple l ->
           Fmt.hvbox
-            (list (Fmt.parens CT.core_type) ~sep:(fun f () ->
+            (list CT.core_type_parens ~sep:(fun f () ->
                  Fmt.string f " *";
                  Fmt.sp f ()))
             f l

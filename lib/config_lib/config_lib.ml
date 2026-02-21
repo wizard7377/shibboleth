@@ -13,6 +13,7 @@ type t = {
   curry_expressions : level; [@default `Disable]
   curry_types : level; [@default `Disable]
   toplevel_names : level; [@default `Enable]
+  pattern_guess : level; [@default `Enable]
   verbosity : int; [@default 0]
   concat_output : bool; [@default true]
   force : bool; [@default false]
@@ -20,6 +21,7 @@ type t = {
   debug : string list; [@default []]
   check_ocaml : bool; [@default false]
   dash_to_underscore : bool; [@default true]
+  no_embed_lowercase : bool; [@default true]
   input_file : source; [@default StdIn]
   output_file : target; [@default Silent]
   context_output : string option; [@default None]
@@ -45,6 +47,7 @@ let get : type a. a flag -> t -> a =
   | Convert_flag Curry_expressions -> cfg.curry_expressions
   | Convert_flag Curry_types -> cfg.curry_types
   | Convert_flag Toplevel_names -> cfg.toplevel_names
+  | Convert_flag Pattern_guess -> cfg.pattern_guess
   | Shell_flag Verbosity -> cfg.verbosity
   | Shell_flag Force -> cfg.force
   | Shell_flag Quiet -> cfg.quiet
@@ -52,6 +55,7 @@ let get : type a. a flag -> t -> a =
   | Misc_flag Concat_output -> cfg.concat_output
   | Misc_flag Check_ocaml -> cfg.check_ocaml
   | Misc_flag Dash_to_underscore -> cfg.dash_to_underscore
+  | Misc_flag No_embed_lowercase -> cfg.no_embed_lowercase
   | File_flag Input_file -> cfg.input_file
   | File_flag Output_file -> cfg.output_file
   | File_flag Context_output -> cfg.context_output
@@ -73,6 +77,7 @@ let set : type a. a flag -> a -> arg =
   | Convert_flag Curry_expressions -> { cfg with curry_expressions = value }
   | Convert_flag Curry_types -> { cfg with curry_types = value }
   | Convert_flag Toplevel_names -> { cfg with toplevel_names = value }
+  | Convert_flag Pattern_guess -> { cfg with pattern_guess = value }
   | Shell_flag Verbosity -> { cfg with verbosity = value }
   | Shell_flag Force -> { cfg with force = value }
   | Shell_flag Quiet -> { cfg with quiet = value }
@@ -80,6 +85,7 @@ let set : type a. a flag -> a -> arg =
   | Misc_flag Concat_output -> { cfg with concat_output = value }
   | Misc_flag Check_ocaml -> { cfg with check_ocaml = value }
   | Misc_flag Dash_to_underscore -> { cfg with dash_to_underscore = value }
+  | Misc_flag No_embed_lowercase -> { cfg with no_embed_lowercase = value }
   | File_flag Input_file -> { cfg with input_file = value }
   | File_flag Output_file -> { cfg with output_file = value }
   | File_flag Context_output -> { cfg with context_output = value }

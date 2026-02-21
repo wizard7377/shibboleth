@@ -1824,22 +1824,11 @@ let precedence_resolver_tests =
     ("Some x pattern", `Quick, test_pattern_constructor_app);
   ]
 
-(** Main test runner *)
+(** Main test list *)
 
-let run_unit_tests () : unit =
-  Alcotest.run "Backend"
-    [
-      ("Constant Processing", constant_tests);
-      ("Type Processing", type_tests);
-      ("Object Field Processing", object_field_tests);
-      ("Expression Processing", expression_tests);
-      ("Pattern Processing", pattern_tests);
-      ("Declaration Processing", declaration_tests);
-      ("Program Processing", program_tests);
-      ("Complex Type Processing", complex_type_tests);
-      ("Pattern Matching (AST Structure)", pattern_matching_tests);
-      ("Comment Preservation", comment_preservation_tests);
-      ("Precedence Resolver", precedence_resolver_tests);
-    ]
-
-let () = run_unit_tests ()
+let tests : unit Alcotest.test =
+  ( "Unit Tests",
+    constant_tests @ type_tests @ object_field_tests @ expression_tests
+    @ pattern_tests @ declaration_tests @ program_tests @ complex_type_tests
+    @ pattern_matching_tests @ comment_preservation_tests
+    @ precedence_resolver_tests )

@@ -170,6 +170,33 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       @return The value wrapped in a {!Location.loc} structure *)
   let ghost (v : 'a) : 'a Location.loc = mkLoc v Location.none
 
+  (** Helper function to create a pattern extension node for ambiguous patterns.
+      Creates [%sml.pattern "name"] extension to preserve SML pattern semantics.
+
+      @param name The pattern identifier name
+      @return A pattern extension node *)
+  let make_pattern_extension (name : string) : Parsetree.pattern =
+    let extension_name = ghost "sml.pattern" in
+    let payload_expr = Builder.estring name in
+    let payload = Parsetree.PStr [Builder.pstr_eval payload_expr []] in
+    Builder.ppat_extension (extension_name, payload)
+
+  (** Create an expression extension node for ambiguous identifiers.
+      @param name The identifier name
+      @return An expression extension node *)
+  let make_expression_extension (name : string) : Parsetree.expression =
+    let extension_name = ghost "sml.expr" in
+    let payload_expr = Builder.estring name in
+    let payload = Parsetree.PStr [Builder.pstr_eval payload_expr []] in
+    Builder.pexp_extension (extension_name, payload)
+
+  (** Helper function to check if a name starts with a lowercase letter. *)
+  let is_lowercase_name (name : string) : bool =
+    if String.length name = 0 then false
+    else
+      let first_char = String.get name 0 in
+      first_char >= 'a' && first_char <= 'z'
+
   let depth : int ref = ref 0
 
   let trace_part ?(level = 2) ?(ast = "") ?(msg = "") ~value : 'a =
@@ -250,7 +277,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       ~msg:"Processing type conversion"
       ();
     trace_part ~level:2 ~ast:"typ" ~msg:"" (* ~msg:(Ast.show_typ ty) *)
-      ~value:(fun () -> process_type_value ty)
+      ~value:(fun () ->
+        process_type_value ty
+        |> labeller#cite Helpers.Attr.core_type ty.comments
+        |> labeller#cite_for_node Helpers.Attr.core_type ty.pos)
 
   (** {2 Constant Processing}
 
@@ -429,7 +459,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 [(Nolabel, left_exp); (Nolabel, right_exp)])
     in
 
-    let res = begin match expression.value with
+    let res = (begin match expression.value with
     | ExpCon c -> Builder.pexp_constant (process_con c)
     | ExpApp exp_list ->
         (* Resolve precedence to get structured expression *)
@@ -447,18 +477,59 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         (* Try to look up as constructor *)
         let lookup_result = Context.Constructor_registry.lookup
           Ctx.context.constructor_registry ~path:qual_path simple_name in
+        let pattern_guess_level = Common.get (Convert_flag Pattern_guess) config in
+        let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
         (match lookup_result with
-        | Some ctor_info ->
-            (* Constructor reference - use transformed name *)
+        | Some ctor_info when Option.is_some qual_path ->
+            (* Qualified name - always a constructor *)
             let transformed_parts = match qual_path with
               | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
               | None -> [ctor_info.ocaml_name]
             in
             let name_longident = build_longident ~capitalize_modules:true transformed_parts in
             Builder.pexp_construct (ghost name_longident) None
+        | Some ctor_info when not (is_variable_identifier simple_name) 
+                              && (pattern_guess_level <> `Embed || no_embed_lowercase) ->
+            (* Uppercase and either not in Embed mode or no_embed_lowercase is on *)
+            let transformed_parts = match qual_path with
+              | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+              | None -> [ctor_info.ocaml_name]
+            in
+            let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+            Builder.pexp_construct (ghost name_longident) None
+        | Some ctor_info when pattern_guess_level = `Enable ->
+            (* Found in registry and we're trusting context - treat as constructor *)
+            let transformed_parts = match qual_path with
+              | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+              | None -> [ctor_info.ocaml_name]
+            in
+            let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+            Builder.pexp_construct (ghost name_longident) None
+        | Some _ctor_info when pattern_guess_level = `Embed ->
+            (* Found in registry but ambiguous - check no_embed_lowercase flag *)
+            let is_lowercase = is_lowercase_name simple_name in
+            if no_embed_lowercase && is_lowercase then
+              (* Don't embed lowercase names if flag is on - treat as variable *)
+              let lowered_name = match List.rev scoped_name with
+                | last :: prefix -> List.rev (Backend_utils.transform_to_lowercase last :: prefix)
+                | [] -> scoped_name
+              in
+              let name_longident = build_longident lowered_name in
+              Builder.pexp_ident (ghost name_longident)
+            else if no_embed_lowercase && not is_lowercase then
+              (* Uppercase with flag on - treat as constructor *)
+              let transformed_name = Backend_utils.transform_constructor simple_name in
+              let transformed_parts = match qual_path with
+                | Some path -> path @ [transformed_name]
+                | None -> [transformed_name]
+              in
+              let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+              Builder.pexp_construct (ghost name_longident) None
+            else
+              (* Flag off (embed all) - embed as extension *)
+              make_expression_extension simple_name
         | None ->
-            (* Value reference - apply same lowercase transform as pattern variables
-               to ensure consistent renaming (e.g. G -> g_ in both pat and exp) *)
+            (* Not found in registry - treat as variable *)
             let lowered_name = match List.rev scoped_name with
               | last :: prefix -> List.rev (Backend_utils.transform_to_lowercase last :: prefix)
               | [] -> scoped_name
@@ -800,7 +871,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     | FnExp cases ->
         (* fn match -> function ... *)
         process_fun_exp cases.value
-    end in
+    end) in
     (* Attach AST-distributed comments, then extract any remaining comments
        from the regex pool that fall within this expression's byte range *)
     res
@@ -1039,14 +1110,54 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (* Try to look up as constructor *)
             let lookup_result = Context.Constructor_registry.lookup
               Ctx.context.constructor_registry ~path:qual_path simple_name in
+            let pattern_guess_level = Common.get (Convert_flag Pattern_guess) config in
+            let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
             (match lookup_result with
-            | Some ctor_info when is_head || Option.is_some qual_path || not (is_variable_identifier simple_name) ->
+            | Some ctor_info when (is_head || Option.is_some qual_path) ->
+                (* Definitely a constructor - either head or qualified *)
                 let transformed_parts = match qual_path with
                   | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
                   | None -> [ctor_info.ocaml_name]
                 in
                 let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
+            | Some ctor_info when not (is_variable_identifier simple_name) 
+                                  && (pattern_guess_level <> `Embed || no_embed_lowercase) ->
+                (* Uppercase and either not in Embed mode or no_embed_lowercase is on *)
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+                  | None -> [ctor_info.ocaml_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | Some ctor_info when pattern_guess_level = `Enable ->
+                (* Found in registry and we're trusting context - treat as constructor *)
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+                  | None -> [ctor_info.ocaml_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | Some _ctor_info when pattern_guess_level = `Embed ->
+                (* Found in registry but ambiguous - check no_embed_lowercase flag *)
+                let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
+                let is_lowercase = is_lowercase_name simple_name in
+                if no_embed_lowercase && is_lowercase then
+                  (* Don't embed lowercase names if flag is on - treat as variable *)
+                  let name_str = Backend_utils.transform_to_lowercase simple_name in
+                  Builder.ppat_var (ghost name_str)
+                else if no_embed_lowercase && not is_lowercase then
+                  (* Uppercase with flag on - treat as constructor *)
+                  let transformed_name = Backend_utils.transform_constructor simple_name in
+                  let transformed_parts = match qual_path with
+                    | Some path -> path @ [transformed_name]
+                    | None -> [transformed_name]
+                  in
+                  let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                  Builder.ppat_construct (ghost name_longident) None
+                else
+                  (* Flag off (embed all) - embed as extension *)
+                  make_pattern_extension simple_name
             | None when is_head ->
                 (* Head of pattern application: always a constructor *)
                 let transformed_name = Backend_utils.transform_constructor simple_name in
@@ -1057,8 +1168,21 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
             | _ ->
-                let name_str = Backend_utils.transform_to_lowercase simple_name in
-                Builder.ppat_var (ghost name_str))
+                (* No constructor found or Disable mode - use pattern_guess *)
+                if pattern_guess_level = `Embed then
+                  let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
+                  let is_lowercase = is_lowercase_name simple_name in
+                  if no_embed_lowercase && is_lowercase then
+                    (* Don't embed lowercase names if flag is on *)
+                    let name_str = Backend_utils.transform_to_lowercase simple_name in
+                    Builder.ppat_var (ghost name_str)
+                  else
+                    (* Embed uppercase names or if flag is off *)
+                    make_pattern_extension simple_name
+                else
+                  (* Treat as variable *)
+                  let name_str = Backend_utils.transform_to_lowercase simple_name in
+                  Builder.ppat_var (ghost name_str))
         | WithoutOp id ->
             let id_name = idx_to_name id.value in
             let simple_name = name_to_string id_name in
@@ -1069,14 +1193,54 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             in
             let lookup_result = Context.Constructor_registry.lookup
               Ctx.context.constructor_registry ~path:qual_path simple_name in
+            let pattern_guess_level = Common.get (Convert_flag Pattern_guess) config in
+            let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
             (match lookup_result with
-            | Some ctor_info when is_head || Option.is_some qual_path || not (is_variable_identifier simple_name) ->
+            | Some ctor_info when (is_head || Option.is_some qual_path) ->
+                (* Definitely a constructor - either head or qualified *)
                 let transformed_parts = match qual_path with
                   | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
                   | None -> [ctor_info.ocaml_name]
                 in
                 let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
+            | Some ctor_info when not (is_variable_identifier simple_name) 
+                                  && (pattern_guess_level <> `Embed || no_embed_lowercase) ->
+                (* Uppercase and either not in Embed mode or no_embed_lowercase is on *)
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+                  | None -> [ctor_info.ocaml_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | Some ctor_info when pattern_guess_level = `Enable ->
+                (* Found in registry and we're trusting context - treat as constructor *)
+                let transformed_parts = match qual_path with
+                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
+                  | None -> [ctor_info.ocaml_name]
+                in
+                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                Builder.ppat_construct (ghost name_longident) None
+            | Some _ctor_info when pattern_guess_level = `Embed ->
+                (* Found in registry but ambiguous - check no_embed_lowercase flag *)
+                let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
+                let is_lowercase = is_lowercase_name simple_name in
+                if no_embed_lowercase && is_lowercase then
+                  (* Don't embed lowercase names if flag is on - treat as variable *)
+                  let name_str = Backend_utils.transform_to_lowercase simple_name in
+                  Builder.ppat_var (ghost name_str)
+                else if no_embed_lowercase && not is_lowercase then
+                  (* Uppercase with flag on - treat as constructor *)
+                  let transformed_name = Backend_utils.transform_constructor simple_name in
+                  let transformed_parts = match qual_path with
+                    | Some path -> path @ [transformed_name]
+                    | None -> [transformed_name]
+                  in
+                  let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                  Builder.ppat_construct (ghost name_longident) None
+                else
+                  (* Flag off (embed all) - embed as extension *)
+                  make_pattern_extension simple_name
             | None when is_head ->
                 (* Head of pattern application: always a constructor *)
                 let transformed_name = Backend_utils.transform_constructor simple_name in
@@ -1087,8 +1251,21 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
             | _ ->
-                let name_str = Backend_utils.transform_to_lowercase simple_name in
-                Builder.ppat_var (ghost name_str)))
+                (* No constructor found or Disable mode - use pattern_guess *)
+                if pattern_guess_level = `Embed then
+                  let no_embed_lowercase = Common.get (Misc_flag No_embed_lowercase) config in
+                  let is_lowercase = is_lowercase_name simple_name in
+                  if no_embed_lowercase && is_lowercase then
+                    (* Don't embed lowercase names if flag is on *)
+                    let name_str = Backend_utils.transform_to_lowercase simple_name in
+                    Builder.ppat_var (ghost name_str)
+                  else
+                    (* Embed uppercase names or if flag is off *)
+                    make_pattern_extension simple_name
+                else
+                  (* Treat as variable *)
+                  let name_str = Backend_utils.transform_to_lowercase simple_name in
+                  Builder.ppat_var (ghost name_str)))
     | PatApp pat_list ->
         (* Resolve precedence to get structured pattern *)
         let resolved = Precedence_resolver.resolve_pat_precedence pat_list in

@@ -77,6 +77,17 @@ let conversion_flags : (bool * Common.t) Term.t =
     @@ level_arg `Disable
          (Cmdliner.Arg.info [ "curry-types" ] ~doc:curry_types_doc)
   in
+  let pattern_guess_doc =
+    {|Control handling of ambiguous patterns (lowercase identifiers that could be variables or constructors).
+     embed (default): Generate extension nodes [%sml.pattern "name"] for runtime resolution.
+     enable: Trust constructor registry - treat as constructor if registered, variable otherwise.
+     disable: Always treat as variables unless in constructor position.|}
+  in
+  let pattern_guess_flag : Common.level Term.t =
+    Arg.value
+    @@ level_arg `Embed
+         (Cmdliner.Arg.info [ "pattern-guess" ] ~doc:pattern_guess_doc)
+  in
   let convert_force_flag : bool Term.t =
     let doc = "Force overwrite of existing output files and directories." in
     Arg.(value & flag & info [ "force" ] ~doc)
@@ -87,7 +98,8 @@ let conversion_flags : (bool * Common.t) Term.t =
   and+ rename_types = rename_types_flag
   and+ force = convert_force_flag
   and+ curry_expressions = curry_expressions_flag
-  and+ curry_types = curry_types_flag in
+  and+ curry_types = curry_types_flag
+  and+ pattern_guess = pattern_guess_flag in
   ( force,
     Common.create
       Common.
@@ -97,6 +109,7 @@ let conversion_flags : (bool * Common.t) Term.t =
           set (Convert_flag Rename_types) rename_types;
           set (Convert_flag Curry_expressions) curry_expressions;
           set (Convert_flag Curry_types) curry_types;
+          set (Convert_flag Pattern_guess) pattern_guess;
         ] )
 
 let dash_to_underscore_doc =
@@ -105,6 +118,22 @@ let dash_to_underscore_doc =
 
 let dash_to_underscore_flag : bool Term.t =
   Arg.(value & flag & info [ "dash-to-underscore" ] ~doc:dash_to_underscore_doc)
+
+let no_embed_lowercase_doc =
+  {|When pattern_guess is Embed, treat lowercase names normally instead of
+   embedding them as extensions. Uppercase names remain embedded.
+   Default: enabled (lowercase names are not embedded).|}
+
+let embed_all_patterns_doc =
+  {|When pattern_guess is Embed, embed both uppercase and lowercase patterns
+   as extensions. This overrides the default behavior.|}
+
+(* no_embed_lowercase defaults to true; --embed-all-patterns sets it to false *)
+let no_embed_lowercase_flag : bool Term.t =
+  let embed_all =
+    (false, Arg.info [ "embed-all-patterns" ] ~doc:embed_all_patterns_doc)
+  in
+  Arg.(value & vflag true [ embed_all ])
 
 let concat_output : bool Term.t =
   let doc =
@@ -217,6 +246,7 @@ let common_options : Common.t Cmdliner.Term.t =
   and+ dbg = debug
   and+ check_ocaml = check_ocaml_flag
   and+ dash_to_underscore = dash_to_underscore_flag
+  and+ no_embed_lowercase = no_embed_lowercase_flag
   and+ ctx_out = context_output_flag
   and+ ctx_in = context_input_flag
   and+ mangle_types = mangle_types_flag
@@ -234,12 +264,15 @@ let common_options : Common.t Cmdliner.Term.t =
         set (Convert_flag Curry_expressions)
           (Common.get (Convert_flag Curry_expressions) c);
         set (Convert_flag Curry_types) (Common.get (Convert_flag Curry_types) c);
+        set (Convert_flag Pattern_guess)
+          (Common.get (Convert_flag Pattern_guess) c);
         set (Misc_flag Concat_output) co;
         set (Shell_flag Force) force;
         set (Shell_flag Quiet) q;
         set (Shell_flag Debug) dbg;
         set (Misc_flag Check_ocaml) check_ocaml;
         set (Misc_flag Dash_to_underscore) dash_to_underscore;
+        set (Misc_flag No_embed_lowercase) no_embed_lowercase;
         set (File_flag Context_output) ctx_out;
         set (File_flag Context_input) ctx_in;
         set (Mangle_flag Type_mangle) mangle_types;

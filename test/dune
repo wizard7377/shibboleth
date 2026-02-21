@@ -1,0 +1,3 @@
+(test
+ (name tests)
+ (libraries alcotest file_tests unit_tests))

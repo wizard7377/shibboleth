@@ -305,29 +305,47 @@ let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
   let normal_files_rel = List.map to_relative normal_files in
   let source_files_rel = List.map to_relative source_files in
   let cm_files_rel = List.map to_relative cm_files in
-  let _ =
-    List.iter (fun d -> create_dir (Fpath.( // ) output_dir d)) dirs_rel
+
+  (* Apply dash_to_underscore transformation if enabled *)
+  let apply_dash_transform =
+    Common.get (Misc_flag Dash_to_underscore) options
   in
+  let transform_path =
+    if apply_dash_transform then Common.convert_path_dashes_to_underscores
+    else fun p -> p
+  in
+
+  let dirs_rel_transformed = List.map transform_path dirs_rel in
+  let normal_files_rel_transformed = List.map transform_path normal_files_rel in
+  let source_files_rel_transformed = List.map transform_path source_files_rel in
+  let cm_files_rel_transformed = List.map transform_path cm_files_rel in
+
   let _ =
     List.iter
-      (fun f ->
+      (fun d -> create_dir (Fpath.( // ) output_dir d))
+      dirs_rel_transformed
+  in
+  let _ =
+    List.iter2
+      (fun f f_transformed ->
         copy_file
           ~force:(Common.get (Shell_flag Force) options)
           (Fpath.( // ) input_dir f)
-          (Fpath.( // ) output_dir f))
-      normal_files_rel
+          (Fpath.( // ) output_dir f_transformed))
+      normal_files_rel normal_files_rel_transformed
   in
   (* Convert .cm files to dune files *)
   let _ =
     try
       begin
-        List.iter
-          (fun f ->
+        List.iter2
+          (fun f f_transformed ->
             let cm_path = Fpath.( // ) input_dir f in
             match Bos.OS.File.read cm_path with
             | Ok content ->
                 let dir_name =
-                  Fpath.parent f |> Fpath.rem_empty_seg |> Fpath.basename
+                  Fpath.parent f_transformed |> Fpath.rem_empty_seg
+                  |> Fpath.basename
                 in
                 let parsed = Pkg.Cm.parse content in
 
@@ -336,16 +354,16 @@ let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
                 in
                 let dune_path =
                   Fpath.( // ) output_dir
-                    (Fpath.( // ) (Fpath.parent f) (Fpath.v "dune"))
+                    (Fpath.( // ) (Fpath.parent f_transformed) (Fpath.v "dune"))
                 in
                 Bos.OS.File.write dune_path dune_content |> ignore
             | Error _ -> ())
-          cm_files_rel
+          cm_files_rel cm_files_rel_transformed
       end
     with _ -> ()
   in
   let failures, warnings, total =
-    process_sml_files input_dir output_dir source_files_rel options
+    process_sml_files input_dir output_dir source_files_rel_transformed options
   in
   let () = summary Format.err_formatter (failures, warnings, total) in
   if failures = 0 then 0 else 1

@@ -1,5 +1,6 @@
-(test
+(library
  (name unit_tests)
+ (modules unit_tests unit_tests_)
  (libraries
   cli
   alcotest

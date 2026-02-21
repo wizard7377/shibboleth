@@ -5,6 +5,14 @@ open Format_utils
 open Format_ident
 open Format_flags
 
+let remove_comments : string -> string =
+ fun s ->
+  let regex_begin = Re.str "(*" in
+  let regex_end = Re.str "*)" in
+  let rec regex = Re.compile @@ Re.alt [ regex_begin; regex_end ] in
+  let s0 = Re.replace_string ~all:true regex s ~by:"" in
+  s0
+
 module Make
     (CT : Format_types.CORE_TYPE)
     (Pat : Format_types.PATTERN)
@@ -13,29 +21,49 @@ module Make
     (ME : Format_types.MODULE_EXPR)
     (TD : Format_types.TYPE_DECL) =
 struct
+  let sml_comment_payload f a =
+    match (a.attr_name.txt, a.attr_payload) with
+    | ( "sml.comment",
+        PStr
+          [
+            {
+              pstr_desc =
+                Pstr_eval
+                  ( { pexp_desc = Pexp_constant (Pconst_string (s, _, _)); _ },
+                    [] );
+              _;
+            };
+          ] ) ->
+        (fstr "(* " ++ Fmt.string ++ fstr " *)") f (remove_comments s);
+        true
+    | _ -> false
+
   let rec attributes f l = List.iter (attribute f) l
   and item_attributes f l = List.iter (item_attribute f) l
 
   and attribute f a =
-    (box 2
-       (fstr "[@" ++ Fmt.using fst Fmt.string ++ Fmt.sp ++ Fmt.using snd payload
-      ++ fstr "]"))
-      f
-      (a.attr_name.txt, a.attr_payload)
+    if not (sml_comment_payload f a) then
+      (box 2
+         (fstr "[@" ++ Fmt.using fst Fmt.string ++ Fmt.sp
+        ++ Fmt.using snd payload ++ fstr "]"))
+        f
+        (a.attr_name.txt, a.attr_payload)
 
   and item_attribute f a =
-    (box 2
-       (fstr "[@@" ++ Fmt.using fst Fmt.string ++ Fmt.sp
-      ++ Fmt.using snd payload ++ fstr "]"))
-      f
-      (a.attr_name.txt, a.attr_payload)
+    if not (sml_comment_payload f a) then
+      (box 2
+         (fstr "[@@" ++ Fmt.using fst Fmt.string ++ Fmt.sp
+        ++ Fmt.using snd payload ++ fstr "]"))
+        f
+        (a.attr_name.txt, a.attr_payload)
 
   and floating_attribute f a =
-    (box 2
-       (fstr "[@@@" ++ Fmt.using fst Fmt.string ++ Fmt.sp
-      ++ Fmt.using snd payload ++ fstr "]"))
-      f
-      (a.attr_name.txt, a.attr_payload)
+    if not (sml_comment_payload f a) then
+      (box 2
+         (fstr "[@@@" ++ Fmt.using fst Fmt.string ++ Fmt.sp
+        ++ Fmt.using snd payload ++ fstr "]"))
+        f
+        (a.attr_name.txt, a.attr_payload)
 
   and extension f (s, e) =
     (box 2
