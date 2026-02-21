@@ -817,7 +817,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (* SML: let datatype t = datatype u in ... end *)
                 (* OCaml: let module M = struct type t = u end in ... *)
                 let name1_str =
-                  name_to_string (idx_to_name id1.value)
+                  Local.get_name id1
                 in
                 let longid2 =
                   build_longident (idx_to_name id2.value)
@@ -1398,7 +1398,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         []
     | PatRowSimple (lab, pat, rest) -> (
         let lab_str =
-          process_lowercase (name_to_string (idx_to_name lab.value))
+          process_lowercase (Local.get_name lab)
         in
         let pat' = process_pat pat in
         let here = (lab_str, pat') in
@@ -1407,7 +1407,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | other -> here :: process_pat_row other)
     | PatRowVar (id, ty_opt, as_opt, rest_opt) -> (
         (* {x, y} is shorthand for {x = x, y = y} *)
-        let id_str = process_lowercase (name_to_string (idx_to_name id.value)) in
+        let id_str = process_lowercase (Local.get_name id) in
         let var_pat = Builder.ppat_var (ghost id_str) in
         let pat_with_type =
           match ty_opt with
@@ -1419,7 +1419,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           | None -> pat_with_type
           | Some as_id ->
               let as_name =
-                escape_keyword (process_lowercase (name_to_string (idx_to_name as_id.value)))
+                escape_keyword (process_lowercase (Local.get_name as_id))
               in
               Builder.ppat_alias pat_with_type (ghost as_name)
         in
@@ -1574,9 +1574,9 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           let raw_name = match fm.value with
           | FunMatchPrefix (wo, _, _, _, _) -> process_with_op wo.value
           | FunMatchInfix (_, id, _, _, _, _) ->
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
           | FunMatchLow (_, id, _, _, _, _, _) ->
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
           in
           Backend_utils.transform_to_lowercase raw_name
         in
@@ -1739,7 +1739,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     match tb with
     | TypBind (tvars, id, ty, rest_opt) ->
         let name_str =
-          name_to_string (idx_to_name id.value)
+          Local.get_name id
         in
         let params = Backend_utils.process_type_params tvars in
         let manifest = Some (process_type ty) in
@@ -1769,7 +1769,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     match db with
     | DatBind (tvars, id, cb, rest_opt) ->
         let name_str =
-          name_to_string (idx_to_name id.value)
+          Local.get_name id
         in
         Log.log ~subgroup:"datatype" ~level:Debug ~kind:Neutral
           ~msg:(Printf.sprintf "Datatype name: %s" name_str)
@@ -1860,7 +1860,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         ext_constr :: rest
     | ExnBindAlias (id1, id2, rest_opt) ->
         let name1_str =
-          name_to_string (idx_to_name id1.value)
+          Local.get_name id1
         in
         (* Register aliased exception as constructor *)
         register_constructor name1_str;
@@ -1885,8 +1885,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       @return The identifier string *)
   and process_with_op (wo : Ast.with_op) : string =
     match wo with
-    | WithOp id -> name_to_string (idx_to_name id.value)
-    | WithoutOp id -> name_to_string (idx_to_name id.value)
+    | WithOp id -> Local.get_name id
+    | WithoutOp id -> Local.get_name id
 
   (** {1 Structure Processing}
 
@@ -1924,7 +1924,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         in
         Builder.pstr_module
           (Builder.module_binding
-             ~name:(ghost (Some (name_to_string (idx_to_name id.value))))
+             ~name:(ghost (Some (Local.get_name id)))
              ~expr:(Builder.pmod_ident (ghost name)))
         :: []
     | StructStr declaration ->
@@ -1945,7 +1945,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         in
         Builder.pstr_module
           (Builder.module_binding
-             ~name:(ghost (Some (name_to_string (idx_to_name id.value))))
+             ~name:(ghost (Some (Local.get_name id)))
              ~expr:mod_expr)
         :: []
     | FunctorAppAnonymous (_id, declaration) ->
@@ -2033,7 +2033,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         match sb with
         | StrBind (id, annot_opt, structure, rest_opt) ->
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
             in
             (* Check if this is a module alias (structure I = M) *)
             (match structure.value with
@@ -2185,7 +2185,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | SpecDatAlias (id1, id2) ->
             (* Datatype alias in signature *)
             let name1_str =
-              name_to_string (idx_to_name id1.value)
+              Local.get_name id1
             in
             let longid2 =
               build_longident (idx_to_name id2.value)
@@ -2261,7 +2261,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         match vd with
         | ValDesc (id, ty, rest_opt) ->
             let name_str =
-              escape_keyword (process_lowercase @@ name_to_string (idx_to_name id.value))
+              escape_keyword (process_lowercase @@ Local.get_name id)
             in
             let core_type = process_type ty in
             let vdesc =
@@ -2287,7 +2287,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         match td with
         | TypDesc (tvars, id, rest_opt) ->
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
             in
             let params = Backend_utils.process_type_params tvars in
             let tdecl =
@@ -2314,7 +2314,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         match dd with
         | DatDesc (tvars, id, cd, rest_opt) ->
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
             in
             let params = Backend_utils.process_type_params tvars in
             let constructors = process_con_specification cd.value in
@@ -2343,7 +2343,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | ConDesc (id, ty_opt, rest_opt) ->
             (* Same as process_con_bind *)
             let name_str =
-              Backend_utils.transform_constructor (name_to_string (idx_to_name id.value))
+              Backend_utils.transform_constructor (Local.get_name id)
             in
             let args =
               match ty_opt with
@@ -2374,7 +2374,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | ExnDesc (id, ty_opt, rest_opt) ->
             (* Similar to process_exn_bind but for signatures *)
             let name_str =
-              Backend_utils.transform_constructor (name_to_string (idx_to_name id.value))
+              Backend_utils.transform_constructor (Local.get_name id)
             in
             let args =
               match ty_opt with
@@ -2404,7 +2404,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         match sd with
         | StrDesc (id, s, rest_opt) ->
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
             in
             let module_type = process_sign s.value in
             let mdecl =
@@ -2480,7 +2480,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (* Datatype alias: datatype t = datatype u *)
             (* In OCaml, this would be: type t = u *)
             let name1_str =
-              name_to_string (idx_to_name id1.value)
+              Local.get_name id1
             in
             let longid2 =
               build_longident (idx_to_name id2.value)
@@ -2615,10 +2615,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           match fb with
           | FctBind (name, param, sig1, annot_opt, body, rest_opt) ->
               let fname_str =
-                name_to_string (idx_to_name name.value)
+                Local.get_name name
               in
               let pname_str =
-                name_to_string (idx_to_name param.value)
+                Local.get_name param
               in
 
               (* Process parameter signature *)
@@ -2666,7 +2666,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           | FctBindOpen (name, specification, annot_opt, body, rest_opt) ->
               (* Opened functor - parameter specification is directly visible *)
               let fname_str =
-                name_to_string (idx_to_name name.value)
+                Local.get_name name
               in
 
               (* Process parameter specification *)
@@ -2716,7 +2716,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
               binding :: rest
           | FctGen (idx, annotate, str, rest_opt) ->
               let fname_str =
-                name_to_string (idx_to_name idx.value)
+                Local.get_name idx
               in
 
               (* Process parameter signature *)
@@ -2784,7 +2784,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         match sb with
         | SignBind (id, s, rest_opt) ->
             let name_str =
-              name_to_string (idx_to_name id.value)
+              Local.get_name id
             in
             (* Push structure boundary so leading_signature_comments inside the
                sig body doesn't reach back past the sig keyword *)
