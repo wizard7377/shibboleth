@@ -1653,6 +1653,28 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         in
         tdecl :: Local.unwrap_rest rest_opt process_dat_bind
 
+  (** Shared helper: build one OCaml constructor declaration from an id and optional type.
+      Called by both process_con_bind (which also registers) and process_con_specification. *)
+  and make_constructor_decl
+      (id : Ast.idx Ast.node)
+      (ty_opt : Ast.typ Ast.node option)
+      : Parsetree.constructor_declaration =
+    let name_str = Backend_utils.transform_constructor (Local.get_name id) in
+    let args =
+      match ty_opt with
+      | None -> Parsetree.Pcstr_tuple []
+      | Some ty -> (
+          match ty.value with
+          | TypRecord fields ->
+              let labels =
+                List.flatten (List.map (fun f -> process_label_declaration f) fields)
+              in
+              Parsetree.Pcstr_record labels
+          | _ -> Parsetree.Pcstr_tuple [ process_type ty ])
+    in
+    labeller#cite Helpers.Attr.constructor_declaration id.comments
+      (Builder.constructor_declaration ~name:(ghost name_str) ~args ~res:None)
+
   (** Convert SML constructor bindings within a datatype.
 
       @param cb The constructor binding(s)
@@ -1661,32 +1683,25 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       Parsetree.constructor_declaration list =
     match cb with
     | ConBind (id, ty_opt, rest_opt) ->
-        let original_name = idx_to_name id.value in
-        let name_str = name_to_string original_name in
-        (* Register constructor in registry *)
-        register_constructor name_str;
-        (* Use transformed name for constructor declaration *)
-        let transformed_name = Backend_utils.transform_constructor name_str in
-        let args =
-          match ty_opt with
-          | None -> Parsetree.Pcstr_tuple []
-          | Some ty -> (
-              match ty.value with
-              | TypRecord fields ->
-                  (* Inline record: Foo of {x: int, y: int} → Foo of { x: int; y: int } *)
-                  let labels =
-                    List.flatten
-                      (List.map (fun f -> process_label_declaration f) fields)
-                  in
-                  Parsetree.Pcstr_record labels
-              | _ -> Parsetree.Pcstr_tuple [ process_type ty ])
-        in
-        let cdecl =
-          labeller#cite Helpers.Attr.constructor_declaration id.comments
-            (Builder.constructor_declaration ~name:(ghost transformed_name) ~args
-               ~res:None)
-        in
-        cdecl :: Local.unwrap_rest rest_opt process_con_bind
+        register_constructor (Local.get_name id);
+        make_constructor_decl id ty_opt
+        :: Local.unwrap_rest rest_opt process_con_bind
+
+  (** Shared helper: build one OCaml extension constructor for an exception.
+      Called by both process_exn_bind (which also registers) and process_exn_specification. *)
+  and make_exn_ext_constructor
+      (id : Ast.idx Ast.node)
+      (ty_opt : Ast.typ Ast.node option)
+      : Parsetree.extension_constructor =
+    let name_str = Backend_utils.transform_constructor (Local.get_name id) in
+    let args =
+      match ty_opt with
+      | None -> Parsetree.Pcstr_tuple []
+      | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
+    in
+    labeller#cite Helpers.Attr.exception_constructor id.comments
+      (Builder.extension_constructor ~name:(ghost name_str)
+         ~kind:(Parsetree.Pext_decl ([], args, None)))
 
   (** Convert SML exception bindings.
 
@@ -1699,23 +1714,9 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       Parsetree.extension_constructor list =
     match eb with
     | ExnBind (id, ty_opt, rest_opt) ->
-        let original_name = idx_to_name id.value in
-        let name_str = name_to_string original_name in
-        (* Register exception as constructor in registry *)
-        register_constructor name_str;
-        (* Use transformed name for exception declaration *)
-        let transformed_name = Backend_utils.transform_constructor name_str in
-        let args =
-          match ty_opt with
-          | None -> Parsetree.Pcstr_tuple []
-          | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
-        in
-        let ext_constr =
-          labeller#cite Helpers.Attr.exception_constructor id.comments
-            (Builder.extension_constructor ~name:(ghost transformed_name)
-               ~kind:(Parsetree.Pext_decl ([], args, None)))
-        in
-        ext_constr :: Local.unwrap_rest rest_opt process_exn_bind
+        register_constructor (Local.get_name id);
+        make_exn_ext_constructor id ty_opt
+        :: Local.unwrap_rest rest_opt process_exn_bind
     | ExnBindAlias (id1, id2, rest_opt) ->
         let name1_str =
           Local.get_name id1
@@ -2172,21 +2173,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       ~msg:"" (* ~msg:(Ast.show_con_specification cd) *) ~value:(fun () ->
         match cd with
         | ConDesc (id, ty_opt, rest_opt) ->
-            (* Same as process_con_bind *)
-            let name_str =
-              Backend_utils.transform_constructor (Local.get_name id)
-            in
-            let args =
-              match ty_opt with
-              | None -> Parsetree.Pcstr_tuple []
-              | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
-            in
-            let cdecl =
-              labeller#cite Helpers.Attr.constructor_declaration id.comments
-                (Builder.constructor_declaration ~name:(ghost name_str) ~args
-                   ~res:None)
-            in
-            cdecl :: Local.unwrap_rest rest_opt process_con_specification)
+            make_constructor_decl id ty_opt
+            :: Local.unwrap_rest rest_opt process_con_specification)
 
   (** Convert SML exception descriptions in signatures.
 
@@ -2198,21 +2186,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       ~msg:"" (* ~msg:(Ast.show_exn_specification ed) *) ~value:(fun () ->
         match ed with
         | ExnDesc (id, ty_opt, rest_opt) ->
-            (* Similar to process_exn_bind but for signatures *)
-            let name_str =
-              Backend_utils.transform_constructor (Local.get_name id)
-            in
-            let args =
-              match ty_opt with
-              | None -> Parsetree.Pcstr_tuple []
-              | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
-            in
-            let ext_constr =
-              labeller#cite Helpers.Attr.exception_constructor id.comments
-                (Builder.extension_constructor ~name:(ghost name_str)
-                   ~kind:(Parsetree.Pext_decl ([], args, None)))
-            in
-            ext_constr :: Local.unwrap_rest rest_opt process_exn_specification)
+            make_exn_ext_constructor id ty_opt
+            :: Local.unwrap_rest rest_opt process_exn_specification)
 
   (** Convert SML structure descriptions in signatures.
 
