@@ -521,28 +521,25 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         (match lookup_result with
         | Some ctor_info when Option.is_some qual_path ->
             (* Qualified name - always a constructor *)
-            let transformed_parts = match qual_path with
-              | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-              | None -> [ctor_info.ocaml_name]
+            let name_longident =
+              Local.build_ctor_longident ~qual_path
+                ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
             in
-            let name_longident = build_longident ~capitalize_modules:true transformed_parts in
             Builder.pexp_construct (ghost name_longident) None
-        | Some ctor_info when not (is_variable_identifier simple_name) 
+        | Some ctor_info when not (is_variable_identifier simple_name)
                               && (pattern_guess_level <> `Embed || no_embed_lowercase) ->
             (* Uppercase and either not in Embed mode or no_embed_lowercase is on *)
-            let transformed_parts = match qual_path with
-              | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-              | None -> [ctor_info.ocaml_name]
+            let name_longident =
+              Local.build_ctor_longident ~qual_path
+                ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
             in
-            let name_longident = build_longident ~capitalize_modules:true transformed_parts in
             Builder.pexp_construct (ghost name_longident) None
         | Some ctor_info when pattern_guess_level = `Enable ->
             (* Found in registry and we're trusting context - treat as constructor *)
-            let transformed_parts = match qual_path with
-              | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-              | None -> [ctor_info.ocaml_name]
+            let name_longident =
+              Local.build_ctor_longident ~qual_path
+                ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
             in
-            let name_longident = build_longident ~capitalize_modules:true transformed_parts in
             Builder.pexp_construct (ghost name_longident) None
         | Some _ctor_info when pattern_guess_level = `Embed ->
             (* Found in registry but ambiguous - check no_embed_lowercase flag *)
@@ -558,11 +555,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             else if no_embed_lowercase && not is_lowercase then
               (* Uppercase with flag on - treat as constructor *)
               let transformed_name = Backend_utils.transform_constructor simple_name in
-              let transformed_parts = match qual_path with
-                | Some path -> path @ [transformed_name]
-                | None -> [transformed_name]
-              in
-              let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+              let name_longident = Local.build_ctor_longident ~qual_path ~ocaml_name:transformed_name in
               Builder.pexp_construct (ghost name_longident) None
             else
               (* Flag off (embed all) - embed as extension *)
@@ -1074,18 +1067,14 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                   (* Head of pattern application is always a constructor *)
                   let lookup_result = Context.Constructor_registry.lookup
                     Ctx.context.constructor_registry ~path:qual_path simple_name in
-                  let transformed_parts = match lookup_result with
+                  let name_longident = match lookup_result with
                     | Some ctor ->
-                        (match qual_path with
-                         | Some path -> path @ [ctor.Context.Constructor_registry.ocaml_name]
-                         | None -> [ctor.ocaml_name])
+                        Local.build_ctor_longident ~qual_path
+                          ~ocaml_name:ctor.Context.Constructor_registry.ocaml_name
                     | None ->
                         let transformed_name = Backend_utils.transform_constructor simple_name in
-                        (match qual_path with
-                         | Some path -> path @ [transformed_name]
-                         | None -> [transformed_name])
+                        Local.build_ctor_longident ~qual_path ~ocaml_name:transformed_name
                   in
-                  let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                   let arg_pats = List.map (fun arg -> process_pat ~is_arg:true ~is_head:false arg) args in
                   let arg_pattern = match arg_pats with
                     | [] -> None
@@ -1154,28 +1143,25 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (match lookup_result with
             | Some ctor_info when (is_head || Option.is_some qual_path) ->
                 (* Definitely a constructor - either head or qualified *)
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-                  | None -> [ctor_info.ocaml_name]
+                let name_longident =
+                  Local.build_ctor_longident ~qual_path
+                    ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
                 in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
-            | Some ctor_info when not (is_variable_identifier simple_name) 
+            | Some ctor_info when not (is_variable_identifier simple_name)
                                   && (pattern_guess_level <> `Embed || no_embed_lowercase) ->
                 (* Uppercase and either not in Embed mode or no_embed_lowercase is on *)
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-                  | None -> [ctor_info.ocaml_name]
+                let name_longident =
+                  Local.build_ctor_longident ~qual_path
+                    ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
                 in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
             | Some ctor_info when pattern_guess_level = `Enable ->
                 (* Found in registry and we're trusting context - treat as constructor *)
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-                  | None -> [ctor_info.ocaml_name]
+                let name_longident =
+                  Local.build_ctor_longident ~qual_path
+                    ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
                 in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
             | Some _ctor_info when pattern_guess_level = `Embed ->
                 (* Found in registry but ambiguous - check no_embed_lowercase flag *)
@@ -1188,11 +1174,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 else if no_embed_lowercase && not is_lowercase then
                   (* Uppercase with flag on - treat as constructor *)
                   let transformed_name = Backend_utils.transform_constructor simple_name in
-                  let transformed_parts = match qual_path with
-                    | Some path -> path @ [transformed_name]
-                    | None -> [transformed_name]
-                  in
-                  let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                  let name_longident = Local.build_ctor_longident ~qual_path ~ocaml_name:transformed_name in
                   Builder.ppat_construct (ghost name_longident) None
                 else
                   (* Flag off (embed all) - embed as extension *)
@@ -1200,11 +1182,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             | None when is_head ->
                 (* Head of pattern application: always a constructor *)
                 let transformed_name = Backend_utils.transform_constructor simple_name in
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [transformed_name]
-                  | None -> [transformed_name]
-                in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                let name_longident = Local.build_ctor_longident ~qual_path ~ocaml_name:transformed_name in
                 Builder.ppat_construct (ghost name_longident) None
             | _ ->
                 (* No constructor found or Disable mode - use pattern_guess *)
@@ -1237,28 +1215,25 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             (match lookup_result with
             | Some ctor_info when (is_head || Option.is_some qual_path) ->
                 (* Definitely a constructor - either head or qualified *)
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-                  | None -> [ctor_info.ocaml_name]
+                let name_longident =
+                  Local.build_ctor_longident ~qual_path
+                    ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
                 in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
-            | Some ctor_info when not (is_variable_identifier simple_name) 
+            | Some ctor_info when not (is_variable_identifier simple_name)
                                   && (pattern_guess_level <> `Embed || no_embed_lowercase) ->
                 (* Uppercase and either not in Embed mode or no_embed_lowercase is on *)
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-                  | None -> [ctor_info.ocaml_name]
+                let name_longident =
+                  Local.build_ctor_longident ~qual_path
+                    ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
                 in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
             | Some ctor_info when pattern_guess_level = `Enable ->
                 (* Found in registry and we're trusting context - treat as constructor *)
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [ctor_info.Context.Constructor_registry.ocaml_name]
-                  | None -> [ctor_info.ocaml_name]
+                let name_longident =
+                  Local.build_ctor_longident ~qual_path
+                    ~ocaml_name:ctor_info.Context.Constructor_registry.ocaml_name
                 in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
                 Builder.ppat_construct (ghost name_longident) None
             | Some _ctor_info when pattern_guess_level = `Embed ->
                 (* Found in registry but ambiguous - check no_embed_lowercase flag *)
@@ -1271,11 +1246,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 else if no_embed_lowercase && not is_lowercase then
                   (* Uppercase with flag on - treat as constructor *)
                   let transformed_name = Backend_utils.transform_constructor simple_name in
-                  let transformed_parts = match qual_path with
-                    | Some path -> path @ [transformed_name]
-                    | None -> [transformed_name]
-                  in
-                  let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                  let name_longident = Local.build_ctor_longident ~qual_path ~ocaml_name:transformed_name in
                   Builder.ppat_construct (ghost name_longident) None
                 else
                   (* Flag off (embed all) - embed as extension *)
@@ -1283,11 +1254,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             | None when is_head ->
                 (* Head of pattern application: always a constructor *)
                 let transformed_name = Backend_utils.transform_constructor simple_name in
-                let transformed_parts = match qual_path with
-                  | Some path -> path @ [transformed_name]
-                  | None -> [transformed_name]
-                in
-                let name_longident = build_longident ~capitalize_modules:true transformed_parts in
+                let name_longident = Local.build_ctor_longident ~qual_path ~ocaml_name:transformed_name in
                 Builder.ppat_construct (ghost name_longident) None
             | _ ->
                 (* No constructor found or Disable mode - use pattern_guess *)
