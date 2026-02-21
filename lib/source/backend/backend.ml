@@ -2016,15 +2016,11 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             push_module name_str;
             (* Push structure boundary so leading_comments inside the
                struct body doesn't reach back past the struct keyword *)
-            let saved_boundary =
-              match structure.pos with
-              | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
-              | None -> labeller#push_structure_boundary 0
-            in
             (* Convert the structure body to a module expression *)
-            let module_expr = structure_to_module_expr structure.value in
-            (* Restore boundary for outer scope *)
-            labeller#restore_structure_boundary saved_boundary;
+            let module_expr =
+              Local.with_structure_boundary structure.pos
+                (fun () -> structure_to_module_expr structure.value)
+            in
             (* Pop module name from path *)
             pop_module ();
             let module_expr_with_sig =
@@ -2592,13 +2588,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
               let param_module_type = process_sign sig1.value in
 
               (* Process functor body with scoped structure boundary *)
-              let saved_boundary =
-                match body.pos with
-                | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
-                | None -> labeller#push_structure_boundary 0
+              let body_items =
+                Local.with_structure_boundary body.pos
+                  (fun () -> process_str body.value)
               in
-              let body_items = process_str body.value in
-              labeller#restore_structure_boundary saved_boundary;
               let body_module_expr = Builder.pmod_structure body_items in
 
               (* Add result signature constraint if present *)
@@ -2643,13 +2636,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
               in
 
               (* Process functor body with scoped structure boundary *)
-              let saved_boundary =
-                match body.pos with
-                | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
-                | None -> labeller#push_structure_boundary 0
+              let body_items =
+                Local.with_structure_boundary body.pos
+                  (fun () -> process_str body.value)
               in
-              let body_items = process_str body.value in
-              labeller#restore_structure_boundary saved_boundary;
               let body_module_expr = Builder.pmod_structure body_items in
 
               (* Add result signature constraint if present *)
@@ -2697,13 +2687,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 | Some (_annot, sig1) -> process_sign sig1.value
               in
               (* Process functor body with scoped structure boundary *)
-              let saved_boundary =
-                match str.pos with
-                | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
-                | None -> labeller#push_structure_boundary 0
+              let body_items =
+                Local.with_structure_boundary str.pos
+                  (fun () -> process_str str.value)
               in
-              let body_items = process_str str.value in
-              labeller#restore_structure_boundary saved_boundary;
               let body_module_expr = Builder.pmod_structure body_items in
 
               (* Add result signature constraint if present *)
@@ -2755,13 +2742,10 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             in
             (* Push structure boundary so leading_signature_comments inside the
                sig body doesn't reach back past the sig keyword *)
-            let saved_boundary =
-              match s.pos with
-              | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
-              | None -> labeller#push_structure_boundary 0
+            let module_type =
+              Local.with_structure_boundary s.pos
+                (fun () -> process_sign s.value)
             in
-            let module_type = process_sign s.value in
-            labeller#restore_structure_boundary saved_boundary;
             let mtdecl =
               labeller#cite Helpers.Attr.module_type_declaration id.comments
                 (Builder.module_type_declaration ~name:(ghost name_str)
