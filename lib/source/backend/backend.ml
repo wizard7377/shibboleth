@@ -737,30 +737,14 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                         Builder.pstr_type Asttypes.Recursive tb_decls;
                       ]
                 in
-                let mod_name = ghost (Some "Types_") in
-                let mod_expr = Builder.pmod_structure type_items in
-                let body =
-                  process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
-                  |> labeller#cite Helpers.Attr.expression expression.comments
-                in
-                Builder.pexp_letmodule mod_name mod_expr body
+                wrap_in_type_module type_items expression rest_decs exps
             | TypDec tb ->
                 (* Handle type declarations in let expressions *)
                 (* SML: let type t = int in ... end *)
                 (* OCaml: let module M = struct type t = int end in ... *)
                 let tdecls = process_typ_bind tb.value in
-                let type_items =
-                  [ Builder.pstr_type Asttypes.Nonrecursive tdecls ]
-                in
-                let mod_name = ghost (Some "Types_") in
-                let mod_expr = Builder.pmod_structure type_items in
-                let body =
-                  process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
-                  |> labeller#cite Helpers.Attr.expression expression.comments
-                in
-                Builder.pexp_letmodule mod_name mod_expr body
+                let type_items = [ Builder.pstr_type Asttypes.Nonrecursive tdecls ] in
+                wrap_in_type_module type_items expression rest_decs exps
             | LocalDec (d1, d2) ->
                 (* Handle local declarations in let expressions *)
                 (* SML: let local dec1 in dec2 end in ... end *)
@@ -809,12 +793,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 (* Datatype alias in let expression *)
                 (* SML: let datatype t = datatype u in ... end *)
                 (* OCaml: let module M = struct type t = u end in ... *)
-                let name1_str =
-                  Local.get_name id1
-                in
-                let longid2 =
-                  build_longident (idx_to_name id2.value)
-                in
+                let name1_str = Local.get_name id1 in
+                let longid2 = build_longident (idx_to_name id2.value) in
                 let alias_type = Builder.ptyp_constr (ghost longid2) [] in
                 let tdecl =
                   labeller#cite Helpers.Attr.type_declaration id1.comments
@@ -822,17 +802,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                        ~cstrs:[] ~kind:Parsetree.Ptype_abstract
                        ~private_:Asttypes.Public ~manifest:(Some alias_type))
                 in
-                let type_items =
-                  [ Builder.pstr_type Asttypes.Recursive [ tdecl ] ]
-                in
-                let mod_name = ghost (Some "Types_") in
-                let mod_expr = Builder.pmod_structure type_items in
-                let body =
-                  process_exp
-                    { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
-                  |> labeller#cite Helpers.Attr.expression expression.comments
-                in
-                Builder.pexp_letmodule mod_name mod_expr body
+                let type_items = [ Builder.pstr_type Asttypes.Recursive [ tdecl ] ] in
+                wrap_in_type_module type_items expression rest_decs exps
             | AbstractDec (db, tb_opt, inner_decs) ->
                 (* Abstract type in let expression *)
                 (* Process the inner declarations, hiding the datatype constructors *)
@@ -915,6 +886,25 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       fn cases -> function cases *)
   and process_fun_exp (cases : Ast.matching) : Parsetree.expression =
     Builder.pexp_function (process_matching cases)
+
+  (** Wrap [type_items] in an anonymous [Types_] module, then continue processing
+      the remaining let-expression body. Used by DatDec, TypDec, and DataDecAlias
+      arms of LetExp to avoid repeating the same pexp_letmodule construction. *)
+  and wrap_in_type_module
+      (type_items : Parsetree.structure)
+      (expression : Ast.expression Ast.node)
+      (rest_decs : Ast.declaration Ast.node list)
+      (exps : Ast.expression Ast.node list)
+      : Parsetree.expression =
+    let mod_name = ghost (Some "Types_") in
+    let mod_expr = Builder.pmod_structure type_items in
+    let body =
+      process_exp
+        { value = LetExp (rest_decs, exps); pos = expression.pos; comments = [] }
+      |> labeller#cite Helpers.Attr.expression expression.comments
+    in
+    Builder.pexp_letmodule mod_name mod_expr body
+
   (** {2 Expression Rows and Matching}
 
       Helper functions for expression-related constructs. *)
