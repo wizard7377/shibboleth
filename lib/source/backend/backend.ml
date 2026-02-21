@@ -226,6 +226,44 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
   let idx_to_name (idx : Ast.idx) : string list =
     Backend_utils.idx_to_name idx
 
+  (** Pure utility helpers — no calls into the recursive processing chain *)
+  module Local = struct
+    (** Build a constructor longident from its registry info.
+        Encapsulates the repeated pattern:
+          match qual_path with Some p -> p @ [name] | None -> [name]
+          |> build_longident ~capitalize_modules:true *)
+    let build_ctor_longident ~qual_path ~ocaml_name =
+      let parts = match qual_path with
+        | Some path -> path @ [ocaml_name]
+        | None -> [ocaml_name]
+      in
+      build_longident ~capitalize_modules:true parts
+
+    (** Run [f ()] with a scoped structure boundary around [pos].
+        Encapsulates the repeated push/restore pattern in str_bind,
+        functor_binding, and signature_binding. *)
+    let with_structure_boundary
+        (pos : (Lexing.position * Lexing.position) option)
+        (f : unit -> 'a) : 'a =
+      let saved = match pos with
+        | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
+        | None         -> labeller#push_structure_boundary 0
+      in
+      let result = f () in
+      labeller#restore_structure_boundary saved;
+      result
+
+    (** Unwrap an optional rest pointer and recurse, or return [].
+        Encapsulates the repeated pattern:
+          match rest_opt with None -> [] | Some r -> f r.value *)
+    let unwrap_rest rest_opt f =
+      match rest_opt with None -> [] | Some r -> f r.value
+
+    (** Extract the string name from an AST identifier node.
+        Encapsulates [name_to_string (idx_to_name id.value)]. *)
+    let get_name id = name_to_string (idx_to_name id.value)
+  end
+
   (** Main entry point for converting a complete SML program.
 
       @param prog The SML program to convert
