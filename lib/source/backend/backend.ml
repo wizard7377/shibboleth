@@ -241,7 +241,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
 
     (** Run [f ()] with a scoped structure boundary around [pos].
         Encapsulates the repeated push/restore pattern in str_bind,
-        functor_binding, and signature_binding. *)
+        functor_binding, and signature_binding.
+        Exception-safe: restore always runs even if [f] raises. *)
     let with_structure_boundary
         (pos : (Lexing.position * Lexing.position) option)
         (f : unit -> 'a) : 'a =
@@ -249,13 +250,13 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | Some (sp, _) -> labeller#push_structure_boundary sp.pos_cnum
         | None         -> labeller#push_structure_boundary 0
       in
-      let result = f () in
-      labeller#restore_structure_boundary saved;
-      result
+      Fun.protect ~finally:(fun () -> labeller#restore_structure_boundary saved) f
 
     (** Unwrap an optional rest pointer and recurse, or return [].
         Encapsulates the repeated pattern:
-          match rest_opt with None -> [] | Some r -> f r.value *)
+          match rest_opt with None -> [] | Some r -> f r.value
+        Note: passes [r.value] to [f], discarding [r.pos]. Only use for
+        callers that do not need positional/comment data from the rest node. *)
     let unwrap_rest rest_opt f =
       match rest_opt with None -> [] | Some r -> f r.value
 
