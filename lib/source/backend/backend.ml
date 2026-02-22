@@ -2384,6 +2384,25 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
         | ProgEmpty -> []) in
     res
 
+  (** Shared helper: process functor body structure and apply optional result
+      signature constraint.
+      @param body The functor body structure node
+      @param annot_opt Optional result signature annotation
+      @return OCaml module expression for the functor body *)
+  and process_functor_body_expr
+      ~(body : Ast.structure Ast.node)
+      ~(annot_opt : (Ast.anotate Ast.node * Ast.signature Ast.node) option)
+      : Parsetree.module_expr =
+    let body_items =
+      Local.with_structure_boundary body.pos
+        (fun () -> process_str body.value)
+    in
+    let body_module_expr = Builder.pmod_structure body_items in
+    match annot_opt with
+    | None -> body_module_expr
+    | Some (_annot, result_sig) ->
+        Builder.pmod_constraint body_module_expr (process_sign result_sig.value)
+
   (** Convert SML functor bindings (parameterized modules).
 
       SML: [functor F(X : SIG) = struct ... end] OCaml:
@@ -2415,21 +2434,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
               (* Process parameter signature *)
               let param_module_type = process_sign sig1.value in
 
-              (* Process functor body with scoped structure boundary *)
-              let body_items =
-                Local.with_structure_boundary body.pos
-                  (fun () -> process_str body.value)
-              in
-              let body_module_expr = Builder.pmod_structure body_items in
-
-              (* Add result signature constraint if present *)
-              let final_body =
-                match annot_opt with
-                | None -> body_module_expr
-                | Some (_annot, result_sig) ->
-                    let result_module_type = process_sign result_sig.value in
-                    Builder.pmod_constraint body_module_expr result_module_type
-              in
+              let final_body = process_functor_body_expr ~body ~annot_opt in
 
               (* Create functor *)
               let functor_param =
@@ -2458,21 +2463,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 Builder.pmty_signature param_module_spec
               in
 
-              (* Process functor body with scoped structure boundary *)
-              let body_items =
-                Local.with_structure_boundary body.pos
-                  (fun () -> process_str body.value)
-              in
-              let body_module_expr = Builder.pmod_structure body_items in
-
-              (* Add result signature constraint if present *)
-              let final_body =
-                match annot_opt with
-                | None -> body_module_expr
-                | Some (_annot, result_sig) ->
-                    let result_module_type = process_sign result_sig.value in
-                    Builder.pmod_constraint body_module_expr result_module_type
-              in
+              let final_body = process_functor_body_expr ~body ~annot_opt in
 
               (* Create functor with unit parameter (opened specs) *)
               let functor_param =
@@ -2504,21 +2495,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                     Builder.pmty_signature []
                 | Some (_annot, sig1) -> process_sign sig1.value
               in
-              (* Process functor body with scoped structure boundary *)
-              let body_items =
-                Local.with_structure_boundary str.pos
-                  (fun () -> process_str str.value)
-              in
-              let body_module_expr = Builder.pmod_structure body_items in
-
-              (* Add result signature constraint if present *)
-              let final_body =
-                match annotate with
-                | None -> body_module_expr
-                | Some (_annot, result_sig) ->
-                    let result_module_type = process_sign result_sig.value in
-                    Builder.pmod_constraint body_module_expr result_module_type
-              in
+              let final_body = process_functor_body_expr ~body:str ~annot_opt:annotate in
 
               (* Create functor *)
               let functor_param = Parsetree.Unit in
