@@ -32,6 +32,7 @@ let extract_record_fields (payload : Parsetree.payload) :
 type state = {
   mutable counter : int;
   mutable pending_types : Parsetree.structure_item list;
+  mutable in_functor : bool;
 }
 (** State for the record expansion pass. *)
 
@@ -80,6 +81,37 @@ let collect_label_type_vars (labels : Parsetree.label_declaration list) :
   in
   let args = List.map (fun v -> Builder.ptyp_var v) sorted in
   (params, args)
+
+(** Check if a name matches the generated anonymous record type pattern (__0, __1, ...). *)
+let is_generated_name name =
+  String.length name >= 3 && name.[0] = '_' && name.[1] = '_'
+  && String.sub name 2 (String.length name - 2)
+     |> String.to_seq
+     |> Seq.for_all (fun c -> c >= '0' && c <= '9')
+
+(** Check if a structure item is a generated anonymous record type. *)
+let is_generated_record_str (si : Parsetree.structure_item) =
+  match si.pstr_desc with
+  | Pstr_type (_, [ { ptype_name = { txt; _ }; ptype_kind = Ptype_record _; _ } ])
+    when is_generated_name txt ->
+      true
+  | _ -> false
+
+(** Check if a signature item is a generated anonymous record type. *)
+let is_generated_record_sig (si : Parsetree.signature_item) =
+  match si.psig_desc with
+  | Psig_type (_, [ { ptype_name = { txt; _ }; ptype_kind = Ptype_record _; _ } ])
+    when is_generated_name txt ->
+      true
+  | _ -> false
+
+(** Convert a generated [Psig_type] signature item back to a [Pstr_type]
+    structure item for lifting to the toplevel. *)
+let sig_type_to_str_type (si : Parsetree.signature_item) :
+    Parsetree.structure_item =
+  match si.psig_desc with
+  | Psig_type (rf, tds) -> Builder.pstr_type rf tds
+  | _ -> failwith "process_records: expected Psig_type in lifted sig types"
 
 (** Expand [[%record_type ...]] in a core type, collecting generated types. *)
 let rec expand_core_type (state : state) (ct : Parsetree.core_type) :
@@ -314,12 +346,22 @@ and expand_module_binding (state : state) (mb : Parsetree.module_binding) :
 and expand_module_expr (state : state) (me : Parsetree.module_expr) :
     Parsetree.module_expr =
   match me.pmod_desc with
+  | Pmod_structure str when not state.in_functor ->
+      let saved = state.pending_types in
+      state.pending_types <- [];
+      let str' = expand_structure state str in
+      let lifted, remaining = List.partition is_generated_record_str str' in
+      state.pending_types <- saved @ lifted;
+      { me with pmod_desc = Pmod_structure remaining }
   | Pmod_structure str ->
       let str' = expand_structure state str in
       { me with pmod_desc = Pmod_structure str' }
   | Pmod_functor (fp, body) ->
       let fp' = expand_functor_parameter state fp in
+      let was_in_functor = state.in_functor in
+      state.in_functor <- true;
       let body' = expand_module_expr state body in
+      state.in_functor <- was_in_functor;
       { me with pmod_desc = Pmod_functor (fp', body') }
   | Pmod_constraint (me', mt) ->
       let me'' = expand_module_expr state me' in
@@ -357,12 +399,23 @@ and str_type_to_sig_type (si : Parsetree.structure_item) :
 and expand_module_type (state : state) (mt : Parsetree.module_type) :
     Parsetree.module_type =
   match mt.pmty_desc with
+  | Pmty_signature sg when not state.in_functor ->
+      let saved = state.pending_types in
+      state.pending_types <- [];
+      let sg' = expand_signature state sg in
+      let lifted_sig, remaining = List.partition is_generated_record_sig sg' in
+      let lifted_str = List.map sig_type_to_str_type lifted_sig in
+      state.pending_types <- saved @ lifted_str;
+      { mt with pmty_desc = Pmty_signature remaining }
   | Pmty_signature sg ->
       let sg' = expand_signature state sg in
       { mt with pmty_desc = Pmty_signature sg' }
   | Pmty_functor (fp, body) ->
       let fp' = expand_functor_parameter state fp in
+      let was_in_functor = state.in_functor in
+      state.in_functor <- true;
       let body' = expand_module_type state body in
+      state.in_functor <- was_in_functor;
       { mt with pmty_desc = Pmty_functor (fp', body') }
   | Pmty_with (mt', cstrs) ->
       let mt'' = expand_module_type state mt' in
@@ -454,7 +507,7 @@ and expand_signature (state : state) (sg : Parsetree.signature) :
     toplevel phrases. *)
 let expand_record_types (phrases : Parsetree.toplevel_phrase list) :
     Parsetree.toplevel_phrase list =
-  let state = { counter = 0; pending_types = [] } in
+  let state = { counter = 0; pending_types = []; in_functor = false } in
   List.map
     (fun phrase ->
       match phrase with
