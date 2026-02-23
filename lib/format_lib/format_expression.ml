@@ -26,18 +26,15 @@ struct
       | Pexp_constant c -> constant f c
       | Pexp_let (rf, l, e) ->
           (box 2
-             (parens
-                (Fmt.using fst bindings ++ Fmt.sp ++ kwd "in"
-               ++ Fmt.using snd expression)))
+             (Fmt.using fst bindings ++ Fmt.sp ++ kwd "in"
+            ++ Fmt.using snd expression))
             f
             ((rf, l), e)
-      | Pexp_function cases ->
-          (hbox (parens (kwd "function" ++ case_list))) f cases
+      | Pexp_function cases -> (hbox (kwd "function" ++ case_list)) f cases
       | Pexp_fun (l, e0, p, e) ->
           (box 2
-             (parens
-                (kwd "fun" ++ Fmt.using fst label_exp ++ op "->"
-               ++ Fmt.using snd expression)))
+             (kwd "fun" ++ Fmt.using fst label_exp ++ op "->"
+            ++ Fmt.using snd expression))
             f
             ((l, e0, p), e)
       | Pexp_apply (e, l) -> print_apply f e l
@@ -49,9 +46,8 @@ struct
             f (e, cases)
       | Pexp_try (e, cases) ->
           (Fmt.box ~indent:0
-             (parens
-                (kwd "try" ++ Fmt.using fst expression ++ Fmt.sp ++ kwd "with"
-               ++ Fmt.using snd case_list)))
+             (kwd "try" ++ Fmt.using fst expression ++ Fmt.sp ++ kwd "with"
+            ++ Fmt.using snd case_list))
             f (e, cases)
       | Pexp_tuple l ->
           (hvbox
@@ -325,33 +321,27 @@ struct
         | [ (Nolabel, arg1); (Nolabel, arg2) ] ->
             box 2
               (fun f (arg1, s, arg2) ->
-                Fmt.string f "(";
                 expression_parens f arg1;
                 space f ();
                 Fmt.string f s;
                 space f ();
-                expression_parens f arg2;
-                Fmt.string f ")")
+                expression_parens f arg2)
               f (arg1, s, arg2)
         | [ (_, arg1); (_, arg2) ] when List.mem s [ "::"; "+"; "*"; "-" ] ->
             box 2
               (fun f (arg1, s, arg2) ->
-                Fmt.string f "(";
                 expression_parens f arg1;
                 space f ();
                 Fmt.string f s;
                 space f ();
-                expression_parens f arg2;
-                Fmt.string f ")")
+                expression_parens f arg2)
               f (arg1, s, arg2)
         | _ ->
             box 2
               (fun f (e, l) ->
-                Fmt.string f "(";
                 expression_parens f e;
                 space f ();
-                list label_x_expression f l;
-                Fmt.string f ")")
+                list label_x_expression f l)
               f (e, l))
     | `Prefix s -> (
         let s =
@@ -365,29 +355,23 @@ struct
         | [ (Nolabel, x) ] ->
             box 2
               (fun f (s, x) ->
-                Fmt.string f "(";
                 Fmt.string f s;
                 Fmt.sp f ();
-                expression_parens f x;
-                Fmt.string f ")")
+                expression_parens f x)
               f (s, x)
         | _ ->
             box 2
               (fun f (e, l) ->
-                Fmt.string f "(";
                 expression_parens f e;
                 Fmt.sp f ();
-                list label_x_expression f l;
-                Fmt.string f ")")
+                list label_x_expression f l)
               f (e, l))
     | _ ->
         Fmt.hvbox
           (fun f (e, l) ->
-            Fmt.string f "(";
             expression_parens f e;
             Fmt.sp f ();
-            list label_x_expression f l;
-            Fmt.string f ")")
+            list label_x_expression f l)
           f (e, l)
 
   and label_exp f (l, opt, p) =

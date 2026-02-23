@@ -183,7 +183,7 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
           (fun c ->
             match c with
             | '`' -> Buffer.add_string buf "_bq"
-            | '\'' -> Buffer.add_string buf "_prime"
+            | '\'' -> Buffer.add_char buf '\''
             | _ -> Buffer.add_char buf c)
           s;
         let result = Buffer.contents buf in
@@ -212,7 +212,9 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
             (new_name, true)
           )
         | Functor -> (name', false)
-        | PatternHead -> let res = map_last process_uppercase name' in (res, name' <> res)
+        | PatternHead ->
+            if name' = ["true"] || name' = ["false"] then (name', false)
+            else let res = map_last process_uppercase name' in (res, name' <> res)
         | PatternTail when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) !config) -> begin match name' with
             | [ last ] -> let res = process_lowercase last in ( [ res ], last <> res)
             | _ -> (name', false)
@@ -234,7 +236,8 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
               | ["GREATER"] -> ["Greater"]
               | _ -> name'
             in
-            let res = map_last process_uppercase mapped_name in
+            if mapped_name = ["true"] || mapped_name = ["false"] then (mapped_name, name' <> mapped_name)
+            else let res = map_last process_uppercase mapped_name in
             (res, name' <> res)
             | Operator -> begin 
               let name0 = match name' with
@@ -247,7 +250,7 @@ class process_names (config : Common.t ref) (store : Context.t ref) =
         )
           in 
       let (scope, basename) = self#split_name res in
-      let (res0, res1) = (if (is_keyword) (String.lowercase_ascii basename) && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) !config) then
+      let (res0, res1) = (if (is_keyword) (String.lowercase_ascii basename) && basename <> "true" && basename <> "false" && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) !config) then
         let new_basename = basename ^ "_" in
         let full_name = scope @ [ new_basename ] in
         (self#build_longident full_name, b)

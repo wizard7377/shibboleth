@@ -392,18 +392,18 @@ end) : INTSYN = struct
      Invariant: 1 <= k <= |G|, where |G| is length of G
    *)
   let rec ctxLookup = function
-    | Decl (g_prime_, d_), 1 -> d_
-    | Decl (g_prime_, _), k_prime -> ctxLookup (g_prime_, k_prime - 1)
+    | Decl (g'_, d_), 1 -> d_
+    | Decl (g'_, _), k' -> ctxLookup (g'_, k' - 1)
 
   (*     | ctxLookup (Null, k') = (print ("Looking up k' = " ^ Int.toString k' ^ "\n"); raise Error "Out of Bounce\n") *)
   (*  ctxLookup (Null, k')  should not occur by invariant  *)
   (*  ctxLength G = |G|, the number of declarations in G  *)
   let rec ctxLength g_ =
-    let rec ctxLength_prime = function
+    let rec ctxLength' = function
       | Null, n -> n
-      | Decl (g_, _), n -> ctxLength_prime (g_, n + 1)
+      | Decl (g_, _), n -> ctxLength' (g_, n + 1)
     in
-    ctxLength_prime (g_, 0)
+    ctxLength' (g_, 0)
 
   type nonrec fgnExp_ = exn
 
@@ -779,15 +779,15 @@ end) : INTSYN = struct
   let rec sgnLookup cid = Array.sub (sgnArray, cid)
 
   let rec sgnApp f =
-    let rec sgnApp_prime cid =
+    let rec sgnApp' cid =
       begin if cid = !nextCid then ()
       else begin
         f cid;
-        sgnApp_prime (cid + 1)
+        sgnApp' (cid + 1)
       end
       end
     in
-    sgnApp_prime 0
+    sgnApp' 0
 
   let rec sgnStructAdd strDec =
     let mid = !nextMid in
@@ -812,11 +812,11 @@ end) : INTSYN = struct
     let newConDec =
       begin match sgnLookup cid with
       | ConDec (n, m, i, s, e, u) -> ConDec (new_, m, i, s, e, u)
-      | ConDef (n, m, i, e, e_prime, u, a) ->
-          ConDef (new_, m, i, e, e_prime, u, a)
-      | AbbrevDef (n, m, i, e, e_prime, u) ->
-          AbbrevDef (new_, m, i, e, e_prime, u)
-      | BlockDec (n, m, d, d_prime) -> BlockDec (new_, m, d, d_prime)
+      | ConDef (n, m, i, e, e', u, a) ->
+          ConDef (new_, m, i, e, e', u, a)
+      | AbbrevDef (n, m, i, e, e', u) ->
+          AbbrevDef (new_, m, i, e, e', u)
+      | BlockDec (n, m, d, d') -> BlockDec (new_, m, d, d')
       | SkoDec (n, m, i, e, u) -> SkoDec (new_, m, i, e, u)
       end
     in
@@ -876,7 +876,7 @@ end) : INTSYN = struct
     | s, Shift 0 -> s
     | Shift n, Dot (ft_, s) -> comp (Shift (n - 1), s)
     | Shift n, Shift m -> Shift (n + m)
-    | Dot (ft_, s), s_prime -> Dot (frontSub (ft_, s_prime), comp (s, s_prime))
+    | Dot (ft_, s), s' -> Dot (frontSub (ft_, s'), comp (s, s'))
   (*  Sat Feb 14 10:15:16 1998 -fp  *)
   (*  roughly 15% on standard suite for Twelf 1.1  *)
   (*  next line is an optimization  *)
@@ -888,13 +888,13 @@ end) : INTSYN = struct
 
   let rec blockSub = function
     | Bidx k, s -> begin
-        match bvarSub (k, s) with Idx k_prime -> Bidx k_prime | Block b_ -> b_
+        match bvarSub (k, s) with Idx k' -> Bidx k' | Block b_ -> b_
       end
     | LVar ({ contents = Some b_ }, sk, _), s -> blockSub (b_, comp (sk, s))
     | LVar (({ contents = None } as r), sk, (l, t)), s ->
         LVar (r, comp (sk, s), (l, t))
-    | (Inst uLs_ as l_), s_prime ->
-        Inst (map (function u_ -> EClo (u_, s_prime)) uLs_)
+    | (Inst uLs_ as l_), s' ->
+        Inst (map (function u_ -> EClo (u_, s')) uLs_)
   (*  comp(^k, s) = ^k' for some k' by invariant  *)
   (*  was:
         LVar (r, comp(sk, s), (l, comp (t, s)))
@@ -995,13 +995,13 @@ end) : INTSYN = struct
      then    G |- k : V  and  G |- V : L
    *)
   let rec ctxDec (g_, k) =
-    let rec ctxDec_prime = function
-      | Decl (g_prime_, Dec (x, v_prime_)), 1 ->
-          Dec (x, EClo (v_prime_, Shift k))
-      | Decl (g_prime_, BDec (n, (l, s))), 1 -> BDec (n, (l, comp (s, Shift k)))
-      | Decl (g_prime_, _), k_prime -> ctxDec_prime (g_prime_, k_prime - 1)
+    let rec ctxDec' = function
+      | Decl (g'_, Dec (x, v'_)), 1 ->
+          Dec (x, EClo (v'_, Shift k))
+      | Decl (g'_, BDec (n, (l, s))), 1 -> BDec (n, (l, comp (s, Shift k)))
+      | Decl (g'_, _), k' -> ctxDec' (g'_, k' - 1)
     in
-    ctxDec_prime (g_, k)
+    ctxDec' (g_, k)
 
   (*  ctxDec' (G'', k') = x:V
              where G |- ^(k-k') : G'', 1 <= k' <= k
@@ -1019,13 +1019,13 @@ end) : INTSYN = struct
   let rec blockDec (g_, (Bidx k as v), i) =
     let (BDec (_, (l, s))) = ctxDec (g_, k) in
     let gsome_, lblock_ = conDecBlock (sgnLookup l) in
-    let rec blockDec_prime = function
+    let rec blockDec' = function
       | t, d_ :: l_, 1, j -> decSub (d_, t)
       | t, _ :: l_, n, j ->
-          blockDec_prime
+          blockDec'
             (Dot (Exp (Root (Proj (v, j), Nil)), t), l_, n - 1, j + 1)
     in
-    blockDec_prime (s, lblock_, i, 1)
+    blockDec' (s, lblock_, i, 1)
   (*  G |- s : Gsome  *)
 
   (*  EVar related functions  *)
@@ -1051,7 +1051,7 @@ end) : INTSYN = struct
     | Lam (_, u_) -> headOpt u_
     | _ -> None
 
-  let rec ancestor_prime = function
+  let rec ancestor' = function
     | None -> Anc (None, 0, None)
     | Some (Const c) -> Anc (Some c, 1, Some c)
     | Some (Def d) -> begin
@@ -1063,7 +1063,7 @@ end) : INTSYN = struct
   (*  FgnConst possible, BVar impossible by strictness  *)
 
   (*  ancestor(U) = ancestor info for d = U  *)
-  let rec ancestor u_ = ancestor_prime (headOpt u_)
+  let rec ancestor u_ = ancestor' (headOpt u_)
 
   (*  defAncestor(d) = ancestor of d, d must be defined  *)
   let rec defAncestor d =

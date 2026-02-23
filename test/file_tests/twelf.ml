@@ -47,7 +47,9 @@ end
 module Test3 = struct
   module Info = struct
     let test_name = "test3"
-    let test_desc = "Datatype with lowercase constructors: ok/err -> Ok_/Err_ capitalization"
+
+    let test_desc =
+      "Datatype with lowercase constructors: ok/err -> Ok_/Err_ capitalization"
 
     let test_source =
       [
@@ -69,7 +71,10 @@ end
 module Test4 = struct
   module Info = struct
     let test_name = "test4"
-    let test_desc = "Record types and selectors: {x:real,y:real} -> OCaml record, #x -> fun r -> r#x"
+
+    let test_desc =
+      "Record types and selectors: {x:real,y:real} -> OCaml record, #x -> fun \
+       r -> r#x"
 
     let test_source =
       [
@@ -91,7 +96,9 @@ end
 module Test5 = struct
   module Info = struct
     let test_name = "test5"
-    let test_desc = "Exceptions, orelse->||, and multi-clause fun with prime->_prime renaming"
+
+    let test_desc =
+      "Exceptions, orelse->||, and multi-clause fun with prime renaming"
 
     let test_source =
       [

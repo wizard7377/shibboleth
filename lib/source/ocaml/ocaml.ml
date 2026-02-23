@@ -160,7 +160,8 @@ class process_ocaml ~(opts : Common.t) =
 
     (** Check if a name needs keyword escaping *)
     method private needs_keyword_escape (name : string) : bool =
-      Keyword.is_keyword name && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) config)
+      Keyword.is_keyword name && name <> "true" && name <> "false"
+      && Common.is_flag_enabled (Common.get (Convert_flag Convert_keywords) config)
 
     (** Apply cascading rename: if name_ exists, become name__, otherwise become name_ *)
     method private escape_keyword (name : string) : string =
@@ -234,12 +235,14 @@ class process_ocaml ~(opts : Common.t) =
           in
           Log.log_with ~cfg:config ~level:Debug ~kind:Neutral
             ~msg:(Printf.sprintf "Mapped constructor name: %s -> %s" name_after_escape mapped) ();
-          (* Constructors must be uppercase *)
-          Capital.process_uppercase mapped
+          (* Constructors must be uppercase, but preserve true/false as-is *)
+          if mapped = "true" || mapped = "false" then mapped
+          else Capital.process_uppercase mapped
 
       | InPatternHead ->
-          (* Pattern heads are always constructors *)
-          Capital.process_uppercase name_after_escape
+          (* Pattern heads are always constructors, but preserve true/false *)
+          if name_after_escape = "true" || name_after_escape = "false" then name_after_escape
+          else Capital.process_uppercase name_after_escape
 
       | InValue | InLabel when Common.is_flag_enabled (Common.get (Convert_flag Convert_names) config) ->
           (* Values and labels should be lowercase *)

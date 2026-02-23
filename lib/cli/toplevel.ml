@@ -85,6 +85,8 @@ let convert_file ~(input_files : path list) ?(output_file : path option)
             (Common.get (File_flag Context_output) options);
           set (File_flag Context_input)
             (Common.get (File_flag Context_input) options);
+          set (Dune_flag Dune_open)
+            (Common.get (Dune_flag Dune_open) options);
         ]
   in
   let process =
@@ -317,7 +319,6 @@ let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
 
   let dirs_rel_transformed = List.map transform_path dirs_rel in
   let normal_files_rel_transformed = List.map transform_path normal_files_rel in
-  let source_files_rel_transformed = List.map transform_path source_files_rel in
   let cm_files_rel_transformed = List.map transform_path cm_files_rel in
 
   let _ =
@@ -363,7 +364,7 @@ let convert_group ~(input_dir : path) ~(output_dir : path) ~(options : Common.t)
     with _ -> ()
   in
   let failures, warnings, total =
-    process_sml_files input_dir output_dir source_files_rel_transformed options
+    process_sml_files input_dir output_dir source_files_rel options
   in
   let () = summary Format.err_formatter (failures, warnings, total) in
   if failures = 0 then 0 else 1

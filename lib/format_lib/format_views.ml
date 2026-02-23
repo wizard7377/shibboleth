@@ -66,7 +66,7 @@ let needs_parens_pat p =
 let needs_parens_type t =
   match t.ptyp_desc with
   | Ptyp_var _ | Ptyp_any
-  | Ptyp_constr (_, [])
-  | Ptyp_tuple _ | Ptyp_object _ | Ptyp_class _ ->
+  | Ptyp_constr (_, ([] | [ _ ]))
+  | Ptyp_object _ | Ptyp_class _ ->
       false
   | _ -> true

@@ -9,8 +9,7 @@ open Format_views
 module Make (CT : Format_types.CORE_TYPE) (Attrs : Format_types.ATTRS) = struct
   let rec pattern f x =
     if x.ppat_attributes <> [] then
-      (parens
-         (Fmt.using fst (parens pattern) ++ Fmt.using snd Attrs.attributes))
+      (parens (Fmt.using fst pattern ++ Fmt.using snd Attrs.attributes))
         f
         ({ x with ppat_attributes = [] }, x.ppat_attributes)
     else
@@ -30,23 +29,18 @@ module Make (CT : Format_types.CORE_TYPE) (Attrs : Format_types.ATTRS) = struct
           (parens (Fmt.using fst pattern ++ op "::" ++ Fmt.using snd pattern))
             f (p1, p2)
       | Ppat_construct (li, Some ([], p)) ->
-          (parens
-             (Fmt.using fst longident_loc
-             ++ Fmt.sp
-             ++ Fmt.using snd pattern_parens))
+          (Fmt.using fst longident_loc ++ Fmt.sp ++ Fmt.using snd pattern_parens)
             f (li, p)
       | Ppat_construct (li, Some (vl, p)) ->
-          (parens
-             (Fmt.using (fun (li, _, _) -> li) longident_loc
-             ++ Fmt.sp
-             ++ Fmt.using
-                  (fun (_, vl, _) -> vl)
-                  (parens
-                     (kwd "type"
-                     ++ list ~sep:Fmt.sp (fun f x ->
-                         Fmt.string f x.Location.txt)))
-             ++ Fmt.sp
-             ++ Fmt.using (fun (_, _, p) -> p) pattern_parens))
+          (Fmt.using (fun (li, _, _) -> li) longident_loc
+          ++ Fmt.sp
+          ++ Fmt.using
+               (fun (_, vl, _) -> vl)
+               (parens
+                  (kwd "type"
+                  ++ list ~sep:Fmt.sp (fun f x -> Fmt.string f x.Location.txt)))
+          ++ Fmt.sp
+          ++ Fmt.using (fun (_, _, p) -> p) pattern_parens)
             f (li, vl, p)
       | Ppat_variant (l, None) -> (fstr "`" ++ Fmt.string) f l
       | Ppat_variant (l, Some p) ->

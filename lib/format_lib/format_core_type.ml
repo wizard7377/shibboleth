@@ -17,8 +17,7 @@ module Make (Attrs : Format_types.ATTRS) = struct
 
   let rec core_type f x =
     if x.ptyp_attributes <> [] then
-      (parens
-         (Fmt.using fst (parens core_type) ++ Fmt.using snd Attrs.attributes))
+      (parens (Fmt.using fst core_type ++ Fmt.using snd Attrs.attributes))
         f
         ({ x with ptyp_attributes = [] }, x.ptyp_attributes)
     else
@@ -32,17 +31,16 @@ module Make (Attrs : Format_types.ATTRS) = struct
             List.map (fun (ct, l) f x -> type_with_label f (l, ct)) args
           in
           let ret' = Fmt.const core_type ret in
-          Fmt.parens
-            (Fmt.hvbox
-               (Fmt.concat
-                  ~sep:(fun f () ->
-                    Fmt.string f " ->";
-                    Fmt.sp f ())
-                  (tys @ [ ret' ])))
+          Fmt.hvbox
+            (Fmt.concat
+               ~sep:(fun f () ->
+                 Fmt.string f " ->";
+                 Fmt.sp f ())
+               (tys @ [ ret' ]))
             f ()
       | Ptyp_tuple l ->
           Fmt.hvbox
-            (list core_type ~sep:(fun f () ->
+            (list core_type_parens ~sep:(fun f () ->
                  Fmt.string f " *";
                  Fmt.sp f ()))
             f l
@@ -183,7 +181,7 @@ module Make (Attrs : Format_types.ATTRS) = struct
 
   and type_with_label f (label, c) : unit =
     match label with
-    | Nolabel -> core_type f c
+    | Nolabel -> core_type_parens f c
     | Labelled s ->
         (Fmt.using fst Fmt.string ++ sep ": " ++ Fmt.using snd core_type_parens)
           f (s, c)

@@ -26,7 +26,7 @@ let rec strip_suffix ~suffix s =
   else s
 
 let normalize_op_name s =
-  let s = strip_suffix ~suffix:"_prime" s in
+  let s = strip_suffix ~suffix:"'" s in
   let rec drop_trailing_underscores s =
     if s <> "" && s.[String.length s - 1] = '_' then
       drop_trailing_underscores (String.sub s 0 (String.length s - 1))

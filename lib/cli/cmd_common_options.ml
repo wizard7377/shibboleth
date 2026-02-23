@@ -250,7 +250,8 @@ let common_options : Common.t Cmdliner.Term.t =
   and+ ctx_out = context_output_flag
   and+ ctx_in = context_input_flag
   and+ mangle_types = mangle_types_flag
-  and+ mangle_constructors = mangle_constructors_flag in
+  and+ mangle_constructors = mangle_constructors_flag
+  and+ dune_open = dune_include in
   Common.create
     Common.
       [
@@ -277,4 +278,5 @@ let common_options : Common.t Cmdliner.Term.t =
         set (File_flag Context_input) ctx_in;
         set (Mangle_flag Type_mangle) mangle_types;
         set (Mangle_flag Constructor_mangle) mangle_constructors;
+        set (Dune_flag Dune_open) dune_open;
       ]

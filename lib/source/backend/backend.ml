@@ -68,6 +68,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
 
   let escape_keyword (s : string) : string =
     if Ppxlib.Keyword.is_keyword s
+       && s <> "true" && s <> "false"
        && is_flag_enabled (Common.get (Convert_flag Convert_keywords) config)
     then s ^ "_"
     else s
@@ -77,7 +78,7 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     String.iter
       (fun c ->
         match c with
-        | '\'' -> Buffer.add_string buf "_prime"
+        | '\'' -> Buffer.add_char buf '\''
         | '`' -> Buffer.add_string buf "_bq"
         | _ -> Buffer.add_char buf c)
       s;
@@ -304,20 +305,12 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
   (** Convert SML record type rows to OCaml label declarations. Delegated to Backend_types. *)
   let process_label_declaration = Types.process_label_declaration
 
-  let local_counter = ref 0
-
   let local_structure (s1 : Ppxlib.structure) (s2 : Ppxlib.structure) : Ppxlib.structure =
-    incr local_counter;
-    let mod_name = Printf.sprintf "Local_%d_" !local_counter in
-    let inner_mod = Builder.pstr_module
-      (Builder.module_binding
-        ~name:(ghost (Some mod_name))
-        ~expr:(Builder.pmod_structure s1)) in
     let open_decl = Builder.pstr_open
       (Builder.open_infos
-        ~expr:(Builder.pmod_ident (ghost (Ppxlib.Longident.Lident mod_name)))
+        ~expr:(Builder.pmod_structure s1)
         ~override:Asttypes.Override) in
-    inner_mod :: open_decl :: s2
+    open_decl :: s2
   (** Wrapper function for {!process_type_value}.
 
       @param ty The SML type to convert
@@ -1681,7 +1674,20 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
                 List.flatten (List.map (fun f -> process_label_declaration f) fields)
               in
               Parsetree.Pcstr_record labels
-          | _ -> Parsetree.Pcstr_tuple [ process_type ty ])
+          | _ ->
+              let ct = process_type ty in
+              (match ct.ptyp_desc with
+              | Ptyp_tuple l ->
+                  (* Flatten tuple into inline Pcstr_tuple elements.
+                     Move any attributes (e.g. comments) from the tuple wrapper
+                     onto the last element so they aren't lost. *)
+                  let l' = match ct.ptyp_attributes, List.rev l with
+                    | [], _ | _, [] -> l
+                    | attrs, last :: rest ->
+                        List.rev ({ last with ptyp_attributes = last.ptyp_attributes @ attrs } :: rest)
+                  in
+                  Parsetree.Pcstr_tuple l'
+              | _ -> Parsetree.Pcstr_tuple [ ct ]))
     in
     labeller#cite Helpers.Attr.constructor_declaration id.comments
       (Builder.constructor_declaration ~name:(ghost name_str) ~args ~res:None)
@@ -1708,7 +1714,17 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     let args =
       match ty_opt with
       | None -> Parsetree.Pcstr_tuple []
-      | Some ty -> Parsetree.Pcstr_tuple [ process_type ty ]
+      | Some ty ->
+          let ct = process_type ty in
+          (match ct.ptyp_desc with
+          | Ptyp_tuple l ->
+              let l' = match ct.ptyp_attributes, List.rev l with
+                | [], _ | _, [] -> l
+                | attrs, last :: rest ->
+                    List.rev ({ last with ptyp_attributes = last.ptyp_attributes @ attrs } :: rest)
+              in
+              Parsetree.Pcstr_tuple l'
+          | _ -> Parsetree.Pcstr_tuple [ ct ])
     in
     labeller#cite Helpers.Attr.exception_constructor id.comments
       (Builder.extension_constructor ~name:(ghost name_str)
@@ -2564,9 +2580,14 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     let structure = process_prog prog in
     let trailing = labeller#flush_all_remaining_as_structure_items in
     let structure = structure @ trailing in
+    let dune_opens = Common.get (Dune_flag Dune_open) config in
+    let open_ast = List.map (fun modname ->
+      Builder.pstr_open
+        (Builder.open_infos ~expr:(Builder.pmod_ident (ghost (Longident.Lident modname)))
+           ~override:Override)) dune_opens in
     let header_infos : Ppxlib.Ast.include_declaration list = List.map (fun src -> Builder.(include_infos (pmod_ident (ghost (Longident.Lident src))))) header in
     let header_ast = List.map (fun info -> Builder.pstr_include info) header_infos in
-    let full = header_ast @ structure in
+    let full = open_ast @ header_ast @ structure in
     let _ = labeller#destruct () in
     labeller#check_all_comments_emitted;
     [ Parsetree.Ptop_def full ]
