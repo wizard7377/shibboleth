@@ -304,9 +304,20 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
   (** Convert SML record type rows to OCaml label declarations. Delegated to Backend_types. *)
   let process_label_declaration = Types.process_label_declaration
 
-  let local_structure (s1 : Ppxlib.structure) (s2 : Ppxlib.structure) : Ppxlib.structure = 
-    let oi = Builder.open_infos ~expr:(Builder.pmod_structure s1) ~override:Asttypes.Override in
-    Builder.pstr_open oi :: s2
+  let local_counter = ref 0
+
+  let local_structure (s1 : Ppxlib.structure) (s2 : Ppxlib.structure) : Ppxlib.structure =
+    incr local_counter;
+    let mod_name = Printf.sprintf "Local_%d_" !local_counter in
+    let inner_mod = Builder.pstr_module
+      (Builder.module_binding
+        ~name:(ghost (Some mod_name))
+        ~expr:(Builder.pmod_structure s1)) in
+    let open_decl = Builder.pstr_open
+      (Builder.open_infos
+        ~expr:(Builder.pmod_ident (ghost (Ppxlib.Longident.Lident mod_name)))
+        ~override:Asttypes.Override) in
+    inner_mod :: open_decl :: s2
   (** Wrapper function for {!process_type_value}.
 
       @param ty The SML type to convert

@@ -11,7 +11,15 @@ module type S = sig
   val actual_dir : Fpath.t option
   val check_comments : bool
 end
+module Stringt = (val Alcotest.string)
+module Test_example : Alcotest.TESTABLE with type t = (string * string) = struct 
+  type t = string * string
 
+  let pp fmt (raw, actual) =
+    Stringt.pp fmt raw
+
+  let equal (strip1, _) (strip2, _) = String.equal strip1 strip2
+end
 module Make (M : S) = struct
   include M
 
@@ -76,7 +84,8 @@ module Make (M : S) = struct
     Fun.protect
       ~finally:(fun () -> ignore (Bos.OS.File.delete path))
       (fun () -> f path)
-
+  let rec strip_double_semicolons (input : string) : string =
+    Re.replace_string (Re.compile (Re.str ";;")) ~by:"" input
   let strip_attributes (input : string) : string =
     let len = String.length input in
     let buf = Buffer.create len in
@@ -134,17 +143,14 @@ module Make (M : S) = struct
   let is_whitespace = function
     | ' ' | '\t' | '\n' | '\r' | '\x0b' | '\x0c' -> true
     | _ -> false
-
+  let whitespace_re = Re.compile (Re.rep1 (Re.set " \t\n\r\x0b\x0c"))
   let normalize_output ~check_comments (input : string) : string =
-    let stripped = strip_attributes input in
+    let stripped = strip_double_semicolons @@ strip_attributes input in
     let stripped =
       if check_comments then stripped else strip_comments stripped
     in
-    let buf = Buffer.create (String.length stripped) in
-    String.iter
-      (fun ch -> if not (is_whitespace ch) then Buffer.add_char buf ch)
-      stripped;
-    Buffer.contents buf
+    let res = Re.replace_string whitespace_re ~by:" " stripped in 
+    String.trim res
 
   let build_config ~output_buffer ~context_output =
     let input_files =
@@ -187,14 +193,15 @@ module Make (M : S) = struct
       Alcotest.(check int) "exit code" 0 exit_code;
       let actual_raw = Buffer.contents output_buffer in
       write_actual_output ~expected_path:M.test_expect ~contents:actual_raw;
+      let expected_raw = read_file M.test_expect in
       let expected =
         normalize_output ~check_comments:M.check_comments
-          (read_file M.test_expect)
+          expected_raw
       in
       let actual =
         normalize_output ~check_comments:M.check_comments actual_raw
       in
-      Alcotest.(check string) M.test_desc expected actual
+      Alcotest.(check (module Test_example)) M.test_desc (expected, expected_raw) (actual, actual_raw)
     in
     match M.expect_context with
     | None -> run_with_context None
