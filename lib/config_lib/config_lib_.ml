@@ -32,6 +32,19 @@ and _ convert_flag =
   | Toplevel_names : level convert_flag
   | Pattern_guess : level convert_flag
 
+  (* 
+  Whether or not to, whenever a module `M` qualifies a value, `M.x` to add an `open! M` within the module.
+  This is effective because a module with the name `M` will already be in scope. However, because with SML, its common for a module to contain only just another module (ie, Bool.Bool), it is very likely that the name is duplicated.
+  If not, there is no harm in adding an open statement, and it can be helpful for readability to avoid the extra qualification.
+  *)
+  | Echo_module_open : bool convert_flag
+
+  (*
+  Whether or not to convert some basis structures to simpler OCaml equivalents. 
+  This should include `f o g` becoming `fun x -> f (g x)` and `x before y` becoming `let _ = x in y`
+  *)
+  | Basis_simple : bool convert_flag
+
 and _ misc_flag =
   | Concat_output : bool misc_flag
   | Check_ocaml : bool misc_flag
@@ -48,4 +61,5 @@ and _ dune_flag =
   | Dune_package : string option dune_flag
   | Dune_wrapped : bool dune_flag
   | Dune_open : string list dune_flag
+
 (* Strictly, this isn't specific to dune, but it will likely only see use with libraries *)

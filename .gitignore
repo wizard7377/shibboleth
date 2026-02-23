@@ -12,3 +12,4 @@ deps.svg
 .worktrees/
 personal/
 test/file_tests/**/actual/*
+**/_build/

@@ -59,7 +59,8 @@ let extract_operator (exp : expression node) : idx node option =
   match exp.value with
   | ExpIdx idx ->
       let name = Backend_utils.idx_to_string idx.value in
-      if is_operator name then Some idx else None
+      (* Check both syntactic operators and precedence table for special operators like "o" and "before" *)
+      if is_operator name || Option.is_some (get_precedence name) then Some idx else None
   | _ -> None
 
 (** Find all operator positions in a sequence with their precedence info.

@@ -74,7 +74,7 @@ module Test4 = struct
 
     let test_desc =
       "Record types and selectors: {x:real,y:real} -> OCaml record, #x -> fun \
-       r -> r#x"
+       r -> r.x"
 
     let test_source =
       [
@@ -117,4 +117,29 @@ module Test5 = struct
   include Make (Info)
 end
 
-let cases = [ Test1.case; Test2.case; Test3.case; Test4.case; Test5.case ]
+module Test6 = struct
+  module Info = struct
+    let test_name = "test6"
+
+    let test_desc =
+      "Binary operator uncurrying: T*U->V -> T->U->V, curried defs, wrapped \
+       parenthesized usage"
+
+    let test_source =
+      [
+        Fpath.v "test/file_tests/test6/input/operators.sig";
+        Fpath.v "test/file_tests/test6/input/operators.sml";
+      ]
+
+    let test_expect = Fpath.v "test/file_tests/test6/expect/operators.ml"
+    let test_args = []
+    let actual_dir = Some (Fpath.v "test/file_tests/test6/actual")
+    let test_context = None
+    let expect_context = None
+    let check_comments = false
+  end
+
+  include Make (Info)
+end
+
+let cases = [ Test1.case; Test2.case; Test3.case; Test4.case; Test5.case; Test6.case ]

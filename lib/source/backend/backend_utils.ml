@@ -122,6 +122,27 @@ let is_valid_ocaml_operator (s : string) : bool =
     match s.[0] with '?' | '#' -> false | _ -> true
   else false
 
+(** Strip the "op" prefix from SML operator names like "op+" → "+".
+    Returns the name unchanged if it doesn't have the prefix. *)
+let strip_op_prefix (s : string) : string =
+  if String.length s > 2 && String.sub s 0 2 = "op" then
+    let c = String.get s 2 in
+    if not ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_') then
+      String.sub s 2 (String.length s - 2)
+    else s
+  else s
+
+(** Check if a string is a valid binary (infix) OCaml operator.
+    Excludes unary prefix operators (starting with ! or ~) and constructors (::). *)
+let is_binary_ocaml_operator (s : string) : bool =
+  let s = strip_op_prefix s in
+  is_valid_ocaml_operator s &&
+  s <> "::" &&
+  String.length s > 0 &&
+  (match s.[0] with
+   | '!' | '~' | '?' -> false
+   | _ -> true)
+
 (** Convert a symbolic operator name to a valid OCaml alphanumeric name. Maps
     each symbolic character to a descriptive fragment. *)
 let operator_to_ident (s : string) : string =

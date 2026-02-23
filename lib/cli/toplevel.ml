@@ -85,6 +85,10 @@ let convert_file ~(input_files : path list) ?(output_file : path option)
             (Common.get (File_flag Context_output) options);
           set (File_flag Context_input)
             (Common.get (File_flag Context_input) options);
+          set (Convert_flag Echo_module_open)
+            (Common.get (Convert_flag Echo_module_open) options);
+          set (Convert_flag Basis_simple)
+            (Common.get (Convert_flag Basis_simple) options);
           set (Dune_flag Dune_open)
             (Common.get (Dune_flag Dune_open) options);
         ]

@@ -88,6 +88,22 @@ let conversion_flags : (bool * Common.t) Term.t =
     @@ level_arg `Embed
          (Cmdliner.Arg.info [ "pattern-guess" ] ~doc:pattern_guess_doc)
   in
+  let echo_module_open_doc =
+    {|Automatically add 'open!' statements for modules referenced via qualified names.
+     When a module M is used in a qualified identifier M.x, add 'open! M' at the beginning of the containing structure.
+     This can improve readability by avoiding redundant module qualifications.|}
+  in
+  let echo_module_open_flag : bool Term.t =
+    Arg.(value & flag & info [ "echo-module-open" ] ~doc:echo_module_open_doc)
+  in
+  let basis_simple_doc =
+    {|Convert SML Basis operators to simpler OCaml equivalents.
+     'f o g' becomes 'fun x -> f (g x)' (function composition)
+     'x before y' becomes 'let _ = y in x' (sequencing)|}
+  in
+  let basis_simple_flag : bool Term.t =
+    Arg.(value & flag & info [ "basis-simple" ] ~doc:basis_simple_doc)
+  in
   let convert_force_flag : bool Term.t =
     let doc = "Force overwrite of existing output files and directories." in
     Arg.(value & flag & info [ "force" ] ~doc)
@@ -99,7 +115,9 @@ let conversion_flags : (bool * Common.t) Term.t =
   and+ force = convert_force_flag
   and+ curry_expressions = curry_expressions_flag
   and+ curry_types = curry_types_flag
-  and+ pattern_guess = pattern_guess_flag in
+  and+ pattern_guess = pattern_guess_flag
+  and+ echo_module_open = echo_module_open_flag
+  and+ basis_simple = basis_simple_flag in
   ( force,
     Common.create
       Common.
@@ -110,6 +128,8 @@ let conversion_flags : (bool * Common.t) Term.t =
           set (Convert_flag Curry_expressions) curry_expressions;
           set (Convert_flag Curry_types) curry_types;
           set (Convert_flag Pattern_guess) pattern_guess;
+          set (Convert_flag Echo_module_open) echo_module_open;
+          set (Convert_flag Basis_simple) basis_simple;
         ] )
 
 let dash_to_underscore_doc =

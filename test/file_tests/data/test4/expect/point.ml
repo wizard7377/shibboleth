@@ -11,6 +11,7 @@ module type POINT = sig
                     end;;
 
 
+open! Math;;
 (*  Geometric point with record types and selectors  *);;
 (*  Demonstrates SML records -> OCaml objects conversion  *);;
 type nonrec __0 = { x: real ; y: real };;

@@ -54,6 +54,13 @@ val is_operator_name : string -> bool
 val is_valid_ocaml_operator : string -> bool
 (** Check if a string is a valid OCaml operator name *)
 
+val strip_op_prefix : string -> string
+(** Strip the "op" prefix from SML operator names like "op+" → "+" *)
+
+val is_binary_ocaml_operator : string -> bool
+(** Check if a string is a valid binary (infix) OCaml operator name,
+    excluding unary prefix operators and constructors *)
+
 val operator_to_ident : string -> string
 (** Convert a symbolic operator name to a valid OCaml alphanumeric name *)
 

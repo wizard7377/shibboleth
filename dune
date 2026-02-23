@@ -19,4 +19,5 @@
     --check-ocaml
     --context-output=examples/output/ctx.sctx
     --dash-to-underscore
-    --curry-types=disable))))
+    --curry-types=disable
+    ))))

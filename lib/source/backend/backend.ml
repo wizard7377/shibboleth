@@ -38,6 +38,16 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
   let lexbuf = Ctx.lexbuf
   let current_temp : int ref = ref 0
 
+  (* Track modules that should be opened when echo_module_open is enabled *)
+  let modules_to_open : (string list, unit) Hashtbl.t = Hashtbl.create 10
+  let record_module_for_opening (module_path : string list) : unit =
+    if Common.get (Convert_flag Echo_module_open) config then
+      Hashtbl.replace modules_to_open module_path ()
+  let get_and_clear_modules_to_open () : string list list =
+    let modules = Hashtbl.fold (fun k _ acc -> k :: acc) modules_to_open [] in
+    Hashtbl.clear modules_to_open;
+    modules
+
   (** Extract start position from an AST node, if available *)
   let node_start_pos (n : 'a Ast.node) : Lexing.position option =
     match n.pos with Some (sp, _) -> Some sp | None -> None
@@ -486,20 +496,35 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           let left_exp = process_resolved_exp left in
           let right_exp = process_resolved_exp right in
 
-          let lookup_result = Context.Constructor_registry.lookup
-            Ctx.context.constructor_registry ~path:None op_name in
-          (match lookup_result with
-          | Some ctor ->
-              (* Constructor like :: *)
-              let name_longident = build_longident [ctor.Context.Constructor_registry.ocaml_name] in
-              let tuple = Builder.pexp_tuple [left_exp; right_exp] in
-              Builder.pexp_construct (ghost name_longident) (Some tuple)
-          | None ->
-              (* Regular operator like + *)
-              let op_longident = build_longident (idx_to_name op.value) in
-              Builder.pexp_apply
-                (Builder.pexp_ident (ghost op_longident))
-                [(Nolabel, left_exp); (Nolabel, right_exp)])
+          (* Check if Basis_simple is enabled and handle special operators *)
+          let basis_simple = Common.get (Convert_flag Basis_simple) config in
+          if basis_simple && op_name = "o" then
+            (* f o g → fun x -> f (g x) *)
+            let x_pat = Builder.ppat_var (ghost "x") in
+            let x_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "x")) in
+            let g_x = Builder.pexp_apply right_exp [(Nolabel, x_exp)] in
+            let f_g_x = Builder.pexp_apply left_exp [(Nolabel, g_x)] in
+            Builder.pexp_fun Nolabel None x_pat f_g_x
+          else if basis_simple && op_name = "before" then
+            (* x before y → let _ = y in x *)
+            let unit_pat = Builder.ppat_any in
+            let binding = Builder.value_binding ~pat:unit_pat ~expr:right_exp in
+            Builder.pexp_let Nonrecursive [binding] left_exp
+          else
+            let lookup_result = Context.Constructor_registry.lookup
+              Ctx.context.constructor_registry ~path:None op_name in
+            (match lookup_result with
+            | Some ctor ->
+                (* Constructor like :: *)
+                let name_longident = build_longident [ctor.Context.Constructor_registry.ocaml_name] in
+                let tuple = Builder.pexp_tuple [left_exp; right_exp] in
+                Builder.pexp_construct (ghost name_longident) (Some tuple)
+            | None ->
+                (* Regular operator like + *)
+                let op_longident = build_longident (idx_to_name op.value) in
+                Builder.pexp_apply
+                  (Builder.pexp_ident (ghost op_longident))
+                  [(Nolabel, left_exp); (Nolabel, right_exp)])
     in
 
     let res = (begin match expression.value with
@@ -517,6 +542,11 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
             Some (List.rev (List.tl (List.rev scoped_name)))
           else None
         in
+        (* Record module for opening if echo_module_open is enabled *)
+        (match qual_path with
+        | Some path when List.length path > 0 ->
+            record_module_for_opening path
+        | _ -> ());
         (* Try to look up as constructor *)
         let lookup_result = Context.Constructor_registry.lookup
           Ctx.context.constructor_registry ~path:qual_path simple_name in
@@ -571,7 +601,19 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
               | [] -> scoped_name
             in
             let name_longident = build_longident lowered_name in
-            Builder.pexp_ident (ghost name_longident))
+            let ident_exp = Builder.pexp_ident (ghost name_longident) in
+            (* Wrap binary operators used as values: ( + ) → fun (x, y) -> ( + ) x y *)
+            if Backend_utils.is_binary_ocaml_operator simple_name then
+              let x_pat = Builder.ppat_var (ghost "x__op") in
+              let y_pat = Builder.ppat_var (ghost "y__op") in
+              let x_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "x__op")) in
+              let y_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "y__op")) in
+              let body = Builder.pexp_apply ident_exp
+                [(Nolabel, x_exp); (Nolabel, y_exp)] in
+              let tuple_pat = Builder.ppat_tuple [x_pat; y_pat] in
+              Builder.pexp_fun Nolabel None tuple_pat body
+            else
+              ident_exp)
     (* TODO: InfixApp removed - will be replaced by precedence-resolved ExpApp *)
     (* | InfixApp (e1, op, e2) ->
         let op_name = idx_to_string op.value in
@@ -636,11 +678,11 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
           Helpers.Attr.expression fn_exp no_curry_attr
         in
         let make_record_selector lab_str =
-          (* #label -> fun r -> r#label (for records/objects) *)
+          (* #label -> fun r -> r.label (for records) *)
           let r_pat = Builder.ppat_var (ghost "r") in
           let r_exp = Builder.pexp_ident (ghost (Ppxlib.Longident.Lident "r")) in
           let lab_str' = process_lowercase (sanitize_ident lab_str) in
-          let field_exp = Builder.pexp_send r_exp (ghost @@ lab_str') in
+          let field_exp = Builder.pexp_field r_exp (ghost @@ Ppxlib.Longident.Lident lab_str') in
           Builder.pexp_fun Nolabel None r_pat field_exp
         in
         match lab.value with
@@ -1426,9 +1468,43 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     Log.log ~subgroup:"binding" ~level:Debug ~kind:Neutral
       ~msg:"Processing value binding"
       ();
+    (* Check if an AST pattern represents a binary OCaml operator *)
+    let rec is_binary_op_pattern (pat : Ast.pat node) : bool =
+      match pat.value with
+      | PatIdx wo ->
+          let name = match wo.value with
+            | WithOp id | WithoutOp id -> idx_to_string id.value
+          in
+          Backend_utils.is_binary_ocaml_operator name
+      | PatParen inner -> is_binary_op_pattern inner
+      | _ -> false
+    in
+    (* Uncurry a lambda that takes a tuple into curried form:
+       function (x, y) -> body  →  fun x -> fun y -> body
+       fun (x, y) -> body       →  fun x -> fun y -> body *)
+    let uncurry_operator_lambda (exp : Parsetree.expression) : Parsetree.expression =
+      match exp.pexp_desc with
+      | Pexp_function [{ pc_lhs; pc_guard = None; pc_rhs }] ->
+        (match pc_lhs.ppat_desc with
+         | Ppat_tuple pats when List.length pats = 2 ->
+           List.fold_right (fun pat acc ->
+             Builder.pexp_fun Nolabel None pat acc
+           ) pats pc_rhs
+         | _ -> exp)
+      | Pexp_fun (Nolabel, None, pat, body) ->
+        (match pat.ppat_desc with
+         | Ppat_tuple pats when List.length pats = 2 ->
+           List.fold_right (fun pat acc ->
+             Builder.pexp_fun Nolabel None pat acc
+           ) pats body
+         | _ -> exp)
+      | _ -> exp
+    in
     List.map (fun (pat, exp) ->
       let pat' = process_pat pat in 
       let exp' = process_exp exp in
+      (* Uncurry lambda body for binary operator val bindings *)
+      let exp' = if is_binary_op_pattern pat then uncurry_operator_lambda exp' else exp' in
       let vb = Builder.value_binding ~pat:pat' ~expr:exp' in
       (* Attach comments to the value binding *)
       let vb_with_comments =
@@ -2134,10 +2210,20 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
       ~msg:"" (* ~msg:(Ast.show_val_specification vd) *) ~value:(fun () ->
         match vd with
         | ValDesc (id, ty, rest_opt) ->
+            let raw_name = Local.get_name id in
             let name_str =
-              escape_keyword (process_lowercase @@ Local.get_name id)
+              escape_keyword (process_lowercase @@ raw_name)
             in
             let core_type = process_type ty in
+            (* Uncurry type T * U -> V to T -> U -> V for binary operators *)
+            let core_type =
+              if Backend_utils.is_binary_ocaml_operator raw_name then
+                match core_type.Parsetree.ptyp_desc with
+                | Ptyp_arrow (Nolabel, {ptyp_desc = Ptyp_tuple [t1; t2]; _}, ret) ->
+                    Builder.ptyp_arrow Nolabel t1 (Builder.ptyp_arrow Nolabel t2 ret)
+                | _ -> core_type
+              else core_type
+            in
             let vdesc =
               labeller#cite Helpers.Attr.value_description id.comments
                 (Builder.value_description ~name:(ghost name_str)
@@ -2580,6 +2666,13 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
     let structure = process_prog prog in
     let trailing = labeller#flush_all_remaining_as_structure_items in
     let structure = structure @ trailing in
+    (* Get modules to open from echo_module_open tracking *)
+    let echo_modules = get_and_clear_modules_to_open () in
+    let echo_opens = List.map (fun path ->
+      let longid = build_longident ~capitalize_modules:true path in
+      Builder.pstr_open
+        (Builder.open_infos ~expr:(Builder.pmod_ident (ghost longid))
+           ~override:Override)) echo_modules in
     let dune_opens = Common.get (Dune_flag Dune_open) config in
     let open_ast = List.map (fun modname ->
       Builder.pstr_open
@@ -2587,7 +2680,8 @@ module Make (Ctx : CONTEXT) (Config : CONFIG) = struct
            ~override:Override)) dune_opens in
     let header_infos : Ppxlib.Ast.include_declaration list = List.map (fun src -> Builder.(include_infos (pmod_ident (ghost (Longident.Lident src))))) header in
     let header_ast = List.map (fun info -> Builder.pstr_include info) header_infos in
-    let full = open_ast @ header_ast @ structure in
+    (* Place echo_opens first, then dune opens, then headers, then structure *)
+    let full = echo_opens @ open_ast @ header_ast @ structure in
     let _ = labeller#destruct () in
     labeller#check_all_comments_emitted;
     [ Parsetree.Ptop_def full ]

@@ -14,6 +14,8 @@ type t = {
   curry_types : level; [@default `Disable]
   toplevel_names : level; [@default `Enable]
   pattern_guess : level; [@default `Enable]
+  echo_module_open : bool; [@default true]
+  basis_simple : bool; [@default true]
   verbosity : int; [@default 0]
   concat_output : bool; [@default true]
   force : bool; [@default false]
@@ -48,6 +50,8 @@ let get : type a. a flag -> t -> a =
   | Convert_flag Curry_types -> cfg.curry_types
   | Convert_flag Toplevel_names -> cfg.toplevel_names
   | Convert_flag Pattern_guess -> cfg.pattern_guess
+  | Convert_flag Echo_module_open -> cfg.echo_module_open
+  | Convert_flag Basis_simple -> cfg.basis_simple
   | Shell_flag Verbosity -> cfg.verbosity
   | Shell_flag Force -> cfg.force
   | Shell_flag Quiet -> cfg.quiet
@@ -78,6 +82,8 @@ let set : type a. a flag -> a -> arg =
   | Convert_flag Curry_types -> { cfg with curry_types = value }
   | Convert_flag Toplevel_names -> { cfg with toplevel_names = value }
   | Convert_flag Pattern_guess -> { cfg with pattern_guess = value }
+  | Convert_flag Echo_module_open -> { cfg with echo_module_open = value }
+  | Convert_flag Basis_simple -> { cfg with basis_simple = value }
   | Shell_flag Verbosity -> { cfg with verbosity = value }
   | Shell_flag Force -> { cfg with force = value }
   | Shell_flag Quiet -> { cfg with quiet = value }

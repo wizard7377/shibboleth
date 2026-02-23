@@ -349,6 +349,10 @@ module type INTSYN = sig
 (*  signature INTSYN  *);;
 
 
+open! Int;;
+open! Global;;
+open! App;;
+open! Array;;
 (*  Internal Syntax  *);;
 (*  Author: Frank Pfenning, Carsten Schuermann  *);;
 (*  Modified: Roberto Virga  *);;

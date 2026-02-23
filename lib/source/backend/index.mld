@@ -31,7 +31,7 @@ The backend handles several significant semantic transformations:
 
 {2 Expression Transformations}
 - Pattern matching → OCaml match expressions
-- Record selectors ([#label]) → Anonymous functions ([fun r -> r#label])
+- Record selectors ([#label]) → Anonymous functions ([fun r -> r.label])
 - Sequential expressions → OCaml sequences
 
 {2 Module System}
